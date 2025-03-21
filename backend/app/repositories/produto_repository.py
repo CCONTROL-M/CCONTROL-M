@@ -463,7 +463,7 @@ class ProdutoRepository(BaseRepository[Produto, ProdutoCreate, ProdutoUpdate]):
             page=page,
             size=limit,
             pages=pages
-        )
+            )
 
     @staticmethod
     def update_estoque(db: Session, id_produto: UUID, id_empresa: UUID, quantidade: Decimal) -> Optional[Produto]:
