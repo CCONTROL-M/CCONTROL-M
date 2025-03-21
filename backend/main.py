@@ -8,7 +8,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config.settings import settings
-from app.routers import usuarios, empresas, clientes, produtos
+from app.routers import (
+    usuarios,
+    empresas,
+    clientes,
+    produtos,
+    formas_pagamento,
+    contas_bancarias
+)
 from app.routers.auth import router as auth_router
 
 # Instância principal da aplicação
@@ -46,6 +53,7 @@ app.include_router(usuarios.router)
 app.include_router(empresas.router)
 app.include_router(clientes.router)
 app.include_router(produtos.router)
+app.include_router(formas_pagamento.router)
+app.include_router(contas_bancarias.router)
 
-# Registro futuro de outros routers
-# app.include_router(categorias.router) 
+# Registro de outros routers conforme necessário 
