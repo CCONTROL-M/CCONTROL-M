@@ -9,7 +9,7 @@ from app.models.categoria import Categoria
 from app.models.produto import Produto
 from app.models.compra import Compra, ItemCompra
 from app.models.venda import Venda, ItemVenda
-from app.models.parcelas import ParcelaCompra, ParcelaVenda
+from app.models.parcela import Parcela, ParcelaCompra, ParcelaVenda
 from app.models.despesa import Despesa
 from app.models.log_sistema import LogSistema
 from app.models.permissao_usuario import PermissaoUsuario
@@ -33,6 +33,7 @@ __all__ = [
     "ItemCompra", 
     "Venda", 
     "ItemVenda",
+    "Parcela",
     "ParcelaCompra", 
     "ParcelaVenda",
     "Despesa",

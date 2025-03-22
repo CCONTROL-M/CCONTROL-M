@@ -133,8 +133,25 @@ class LancamentoInDB(LancamentoBase):
 
 
 class Lancamento(LancamentoInDB):
-    """Schema completo de lançamento para resposta da API."""
-    pass
+    """Schema para lançamento com informações completas."""
+    class Config:
+        from_attributes = True
+
+        
+class LancamentoWithDetalhes(Lancamento):
+    """
+    Schema para lançamento com informações detalhadas incluindo dados relacionados.
+    Estende o schema Lancamento com informações adicionais sobre entidades relacionadas.
+    """
+    cliente_nome: Optional[str] = None
+    fornecedor_nome: Optional[str] = None
+    categoria_nome: Optional[str] = None
+    centro_custo_nome: Optional[str] = None
+    conta_descricao: Optional[str] = None
+    forma_pagamento_nome: Optional[str] = None
+    
+    class Config:
+        from_attributes = True
 
 
 class LancamentoList(BaseModel):
@@ -162,4 +179,22 @@ class LancamentoTotais(BaseModel):
     saldo: float = Field(0, description="Saldo (entradas - saídas)")
     total_pendentes: float = Field(0, description="Total de lançamentos pendentes")
     total_pagos: float = Field(0, description="Total de lançamentos pagos")
-    total_cancelados: float = Field(0, description="Total de lançamentos cancelados") 
+    total_cancelados: float = Field(0, description="Total de lançamentos cancelados")
+
+
+class RelatorioFinanceiro(BaseModel):
+    """Schema para relatório financeiro."""
+    periodo: str = Field(..., description="Período do relatório (ex: '2023-01' para janeiro/2023)")
+    entradas: float = Field(0, description="Total de entradas no período")
+    saidas: float = Field(0, description="Total de saídas no período")
+    saldo: float = Field(0, description="Saldo (entradas - saídas)")
+    detalhes: List[dict] = Field([], description="Detalhes agrupados conforme solicitado")
+    
+
+class DadosFluxoCaixa(BaseModel):
+    """Schema para dados de fluxo de caixa."""
+    data: date = Field(..., description="Data do fluxo de caixa")
+    entradas: float = Field(0, description="Total de entradas na data")
+    saidas: float = Field(0, description="Total de saídas na data")
+    saldo_dia: float = Field(0, description="Saldo do dia (entradas - saídas)")
+    saldo_acumulado: float = Field(0, description="Saldo acumulado até a data") 

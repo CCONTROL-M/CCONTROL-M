@@ -55,4 +55,38 @@ class Venda(Base, TimestampedModel):
     
     def __repr__(self) -> str:
         """Representação em string da venda."""
-        return f"<Venda(id={self.id_venda}, descricao='{self.descricao}', valor_total={self.valor_total}, status='{self.status}')>" 
+        return f"<Venda(id={self.id_venda}, descricao='{self.descricao}', valor_total={self.valor_total}, status='{self.status}')>"
+
+
+class ItemVenda(Base, TimestampedModel):
+    """
+    Modelo de item de venda.
+    
+    Representa um item individual em uma venda, com seu produto, quantidade e valores.
+    """
+    
+    __tablename__ = "itens_venda"
+    
+    id_item_venda: Mapped[uuid.UUID] = mapped_column(
+        primary_key=True, 
+        default=uuid.uuid4
+    )
+    id_venda: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("vendas.id_venda", ondelete="CASCADE")
+    )
+    id_produto: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("produtos.id_produto", ondelete="SET NULL"),
+        nullable=True
+    )
+    descricao: Mapped[str] = mapped_column(String, nullable=False)
+    quantidade: Mapped[float] = mapped_column(Float, nullable=False)
+    valor_unitario: Mapped[float] = mapped_column(Float, nullable=False)
+    valor_total: Mapped[float] = mapped_column(Float, nullable=False)
+    
+    # Relacionamentos
+    venda = relationship("Venda", backref="itens")
+    produto = relationship("Produto")
+    
+    def __repr__(self) -> str:
+        """Representação em string do item de venda."""
+        return f"<ItemVenda(id={self.id_item_venda}, produto='{self.descricao}', quantidade={self.quantidade}, valor_total={self.valor_total})>" 

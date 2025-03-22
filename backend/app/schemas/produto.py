@@ -16,6 +16,16 @@ class ProdutoBase(BaseModel):
     categoria: Optional[str] = None
     ativo: Optional[bool] = True
 
+# Esquema básico para relacionamentos
+class ProdutoBasico(BaseModel):
+    id_produto: UUID
+    nome: str
+    codigo: str
+    preco_venda: Decimal
+    
+    class Config:
+        from_attributes = True
+
 # Esquema para criação
 class ProdutoCreate(ProdutoBase):
     id_empresa: UUID

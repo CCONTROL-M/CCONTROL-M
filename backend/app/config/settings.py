@@ -22,7 +22,8 @@ class Settings(BaseSettings):
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     PROJECT_NAME: str = "CCONTROL-M"
     ALLOWED_HOSTS: List[str] = ["*"]
-    LOG_LEVEL: str = "INFO"
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    LOG_DIR: str = os.getenv("LOG_DIR", "logs")
 
     # Banco de dados
     DATABASE_URL: str = os.getenv(
@@ -37,12 +38,20 @@ class Settings(BaseSettings):
     SECURE_COOKIES: bool = False
 
     # Monitoramento
-    ENABLE_MONITORING: bool = False
-    SLOW_QUERY_THRESHOLD: int = 1000  # ms
-    COLLECT_METRICS_INTERVAL: int = 60  # segundos
+    ENABLE_MONITORING: bool = os.getenv("ENABLE_MONITORING", "true").lower() == "true"
+    SLOW_QUERY_THRESHOLD: float = float(os.getenv("SLOW_QUERY_THRESHOLD", "1.0"))  # segundos
+    SLOW_REQUEST_THRESHOLD: float = float(os.getenv("SLOW_REQUEST_THRESHOLD", "1.0"))  # segundos
+    COLLECT_METRICS_INTERVAL: int = int(os.getenv("COLLECT_METRICS_INTERVAL", "60"))  # segundos
+    METRICS_RETENTION_DAYS: int = int(os.getenv("METRICS_RETENTION_DAYS", "7"))
+    ENABLE_METRICS: bool = os.getenv("ENABLE_METRICS", "true").lower() == "true"
+    METRICS_BASIC_AUTH: bool = os.getenv("METRICS_BASIC_AUTH", "true").lower() == "true"
+    METRICS_USERNAME: str = os.getenv("METRICS_USERNAME", "prometheus")
+    METRICS_PASSWORD: str = os.getenv("METRICS_PASSWORD", "ccontrolm")
+    ENABLE_DB_METRICS: bool = os.getenv("ENABLE_DB_METRICS", "false").lower() == "true"
+    PROMETHEUS_NAMESPACE: str = os.getenv("PROMETHEUS_NAMESPACE", "ccontrolm")
 
     # Cache
-    CACHE_EXPIRY: int = 300  # 5 minutos
+    CACHE_EXPIRY: int = int(os.getenv("CACHE_EXPIRATION", "300"))  # 5 minutos
 
     # Paginação
     DEFAULT_PAGE_SIZE: int = 10
@@ -76,7 +85,10 @@ class Settings(BaseSettings):
     PORT: int = 8000
     WORKERS: int = 4
     ENABLE_HEALTH_CHECK: bool = True
-    CORS_ALLOWED_ORIGINS: List[str] = []
+    CORS_ALLOWED_ORIGINS: List[str] = ["*"]
+    CORS_ALLOWED_METHODS: List[str] = ["*"]
+    CORS_ALLOWED_HEADERS: List[str] = ["*"]
+    CORS_ALLOW_CREDENTIALS: bool = True
     SENTRY_DSN: str = ""
     ENABLE_HTTPS_REDIRECT: bool = False
     
@@ -97,7 +109,8 @@ class Settings(BaseSettings):
         "/health", 
         "/api/v1/docs", 
         "/api/v1/openapi.json",
-        "/api/v1/auth/token"
+        "/api/v1/auth/token",
+        "/api/metrics"
     ]
 
     # Redis
@@ -110,13 +123,20 @@ class Settings(BaseSettings):
     ENABLE_AUDIT_LOG: bool = True
     SENSITIVE_FIELDS: List[str] = [
         "password", "senha", "token", "secret", 
-        "credit_card", "cartao_credito", "cpf", "cnpj"
+        "credit_card", "cartao_credito", "cpf", "cnpj",
+        "api_key", "authorization", "auth", "key"
     ]
     AUDIT_IGNORE_PATHS: List[str] = [
         "/health", 
         "/api/v1/docs", 
-        "/api/v1/openapi.json"
+        "/api/v1/openapi.json",
+        "/api/metrics"
     ]
+    
+    # Logging
+    REQUEST_LOGGING: bool = True
+    MASK_SENSITIVE_DATA: bool = True
+    REQUEST_ID_HEADER: str = "X-Request-ID"
 
     @field_validator("SECRET_KEY")
     def validate_secret_key(cls, v: str) -> str:
@@ -148,6 +168,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
+        extra="ignore",  # Ignorar variáveis de ambiente extras
     )
 
 
@@ -160,4 +181,6 @@ if settings.APP_ENV == "production":
     settings.ALLOWED_HOSTS = [host for host in settings.ALLOWED_HOSTS if host != "*"]
     settings.CORS_ALLOWED_ORIGINS = [origin for origin in settings.CORS_ALLOWED_ORIGINS if origin != "*"]
     settings.ENABLE_MONITORING = True
-    settings.ENABLE_AUDIT_LOG = True 
+    settings.ENABLE_AUDIT_LOG = True
+    settings.ENABLE_METRICS = True
+    settings.METRICS_BASIC_AUTH = True 

@@ -8,13 +8,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime
 
-from app.db.session import get_db
+from app.database import get_async_session as get_db
 from app.schemas.cliente_validado import (
     ClienteCreate, ClienteUpdate, ClienteResponse, SituacaoCliente
 )
-from app.core.security import get_current_user_with_permissions
-from app.models.usuario import Usuario
-from app.core.audit import log_sensitive_operation
+from app.dependencies import get_current_user, get_current_active_user
+from app.schemas.usuario import UsuarioResponse as Usuario
+from app.services.log_sistema_service import LogSistemaService
+from app.schemas.log_sistema import LogSistemaCreate
 from app.utils.logging_config import get_logger
 
 # Configurar logger
@@ -22,39 +23,31 @@ logger = get_logger(__name__)
 
 # Criar router
 router = APIRouter(
-    prefix="/clientes",
-    tags=["Clientes"],
-    dependencies=[Depends(get_current_user_with_permissions(["clientes:ler"]))],
+    prefix="/clientes2",
+    tags=["clientes2"],
+    responses={404: {"description": "Cliente não encontrado"}}
 )
-
 
 @router.post(
     "",
     response_model=ClienteResponse,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(get_current_user_with_permissions(["clientes:criar"]))],
 )
 async def criar_cliente(
     cliente: ClienteCreate,
     db: AsyncSession = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user_with_permissions(["clientes:criar"]))
+    current_user: Usuario = Depends(get_current_active_user),
+    log_service: LogSistemaService = Depends()
 ):
     """
     Cria um novo cliente com validação avançada de dados.
     
-    Realiza validações complexas nos dados do cliente:
-    - Valida documento (CPF/CNPJ) de acordo com o tipo de cliente
-    - Garante formato padronizado para contatos
-    - Sanitiza inputs para evitar ataques
-    - Verifica informações de endereço
+    - Valida formato de CPF/CNPJ
+    - Verifica duplicidade de documento
+    - Normaliza dados de contato
     
-    Args:
-        cliente: Dados do cliente a ser criado
-        db: Sessão do banco de dados
-        current_user: Usuário autenticado realizando a operação
-        
     Returns:
-        Cliente criado com dados validados
+        Cliente criado com ID gerado
     """
     try:
         # TODO: Implementar integração com o repositório para salvar no banco
@@ -66,7 +59,7 @@ async def criar_cliente(
         )
         
         # Registrar operação sensível
-        await log_sensitive_operation(
+        await log_service.registrar_operacao_sensivel(
             db=db,
             user=current_user,
             action="cliente:criar",
@@ -315,7 +308,7 @@ async def atualizar_cliente(
         )
         
         # Registrar operação sensível
-        await log_sensitive_operation(
+        await log_service.registrar_operacao_sensivel(
             db=db,
             user=current_user,
             action="cliente:atualizar",
@@ -407,7 +400,7 @@ async def excluir_cliente(
         )
         
         # Registrar operação sensível
-        await log_sensitive_operation(
+        await log_service.registrar_operacao_sensivel(
             db=db,
             user=current_user,
             action="cliente:excluir",

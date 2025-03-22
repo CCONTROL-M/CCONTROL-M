@@ -21,6 +21,13 @@ from app.dependencies import get_current_user
 from app.database import get_async_session
 from app.utils.permissions import require_permission
 from app.schemas.log_sistema import LogSistemaCreate
+from app.utils.error_responses import (
+    resource_not_found, 
+    validation_error, 
+    resource_already_exists,
+    insufficient_permissions,
+    ErrorDetail
+)
 
 # Configuração de logger
 logger = logging.getLogger(__name__)
@@ -28,7 +35,74 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/clientes",
     tags=["Clientes"],
-    responses={404: {"description": "Cliente não encontrado"}},
+    responses={
+        status.HTTP_400_BAD_REQUEST: {
+            "description": "Erro de requisição inválida",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status_code": 400,
+                        "message": "Requisição inválida",
+                        "error_code": "VAL_INVALID_FORMAT",
+                        "details": {
+                            "fields": {
+                                "cpf_cnpj": ["CPF/CNPJ com formato inválido"]
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        status.HTTP_404_NOT_FOUND: {
+            "description": "Cliente não encontrado",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status_code": 404,
+                        "message": "Cliente não encontrado com ID: 123e4567-e89b-12d3-a456-426614174000",
+                        "error_code": "RES_NOT_FOUND",
+                        "details": {
+                            "resource_type": "cliente",
+                            "resource_id": "123e4567-e89b-12d3-a456-426614174000"
+                        }
+                    }
+                }
+            }
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Permissão insuficiente",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status_code": 403,
+                        "message": "Permissão insuficiente para editar em clientes",
+                        "error_code": "AUTH_INSUFFICIENT_PERM",
+                        "details": {
+                            "required_permission": "editar",
+                            "resource": "clientes"
+                        }
+                    }
+                }
+            }
+        },
+        status.HTTP_409_CONFLICT: {
+            "description": "Cliente já existe",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status_code": 409,
+                        "message": "Cliente já existe com os dados fornecidos",
+                        "error_code": "RES_ALREADY_EXISTS",
+                        "details": {
+                            "conflict_fields": {
+                                "cpf_cnpj": "12345678000190"
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 )
 
 
@@ -99,6 +173,10 @@ async def obter_cliente(
     cliente_service = ClienteService()
     cliente = await cliente_service.get_cliente(id_cliente, id_empresa)
     
+    # Se cliente não for encontrado, lançar exceção
+    if not cliente:
+        raise resource_not_found("cliente", id_cliente)
+        
     return cliente
 
 
@@ -110,26 +188,37 @@ async def criar_cliente(
     session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Cria um novo cliente.
+    Cria um novo cliente no sistema.
     
     - **cliente**: Dados do cliente a ser criado
     
-    Retorna os dados do cliente criado.
+    Retorna o cliente criado com seu ID e metadados.
     """
-    # Inicializar serviços
+    # Inicializar serviço
     cliente_service = ClienteService()
     log_service = LogSistemaService()
+    
+    # Verificar se já existe cliente com o mesmo CPF/CNPJ
+    cliente_existente = await cliente_service.buscar_por_cpf_cnpj(
+        cliente.cpf_cnpj, 
+        cliente.id_empresa
+    )
+    
+    if cliente_existente:
+        raise resource_already_exists("cliente", {"cpf_cnpj": cliente.cpf_cnpj})
     
     # Criar cliente
     novo_cliente = await cliente_service.criar_cliente(cliente)
     
-    # Registrar log
+    # Registrar log de criação
     await log_service.registrar_log(
         LogSistemaCreate(
             id_usuario=current_user.sub,
             id_empresa=cliente.id_empresa,
-            acao="cliente:criacao",
-            descricao=f"Cliente {novo_cliente.nome} (ID: {novo_cliente.id_cliente}) criado"
+            operacao="CREATE",
+            entidade="Cliente",
+            detalhes=f"Cliente {novo_cliente.nome} (ID: {novo_cliente.id_cliente}) criado com sucesso",
+            dados=dict(novo_cliente)
         )
     )
     
@@ -139,38 +228,51 @@ async def criar_cliente(
 @router.put("/{id_cliente}", response_model=Cliente)
 @require_permission("clientes", "editar")
 async def atualizar_cliente(
-    id_cliente: UUID,
-    cliente: ClienteUpdate,
+    id_cliente: UUID = Path(..., description="ID do cliente a ser atualizado"),
+    cliente: ClienteUpdate = None,
     id_empresa: UUID = Query(..., description="ID da empresa"),
     current_user: TokenPayload = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Atualiza dados de um cliente existente.
+    Atualiza um cliente existente.
     
-    - **id_cliente**: ID do cliente
-    - **cliente**: Dados para atualização
+    - **id_cliente**: ID do cliente a ser atualizado
+    - **cliente**: Dados a serem atualizados
     - **id_empresa**: ID da empresa para validação
     
-    Retorna os dados atualizados do cliente.
+    Retorna o cliente atualizado.
     """
-    # Inicializar serviços
+    # Inicializar serviço
     cliente_service = ClienteService()
     log_service = LogSistemaService()
     
-    # Buscar cliente atual para o log
-    cliente_atual = await cliente_service.get_cliente(id_cliente, id_empresa)
+    # Verificar se cliente existe
+    cliente_existente = await cliente_service.get_cliente(id_cliente, id_empresa)
+    if not cliente_existente:
+        raise resource_not_found("cliente", id_cliente)
+    
+    # Se estiver alterando CPF/CNPJ, verificar duplicidade
+    if cliente.cpf_cnpj and cliente.cpf_cnpj != cliente_existente.cpf_cnpj:
+        duplicado = await cliente_service.buscar_por_cpf_cnpj(
+            cliente.cpf_cnpj, 
+            id_empresa
+        )
+        if duplicado and duplicado.id_cliente != id_cliente:
+            raise resource_already_exists("cliente", {"cpf_cnpj": cliente.cpf_cnpj})
     
     # Atualizar cliente
     cliente_atualizado = await cliente_service.atualizar_cliente(id_cliente, cliente, id_empresa)
     
-    # Registrar log
+    # Registrar log de atualização
     await log_service.registrar_log(
         LogSistemaCreate(
             id_usuario=current_user.sub,
             id_empresa=id_empresa,
-            acao="cliente:atualizacao",
-            descricao=f"Cliente {cliente_atual.nome} (ID: {id_cliente}) atualizado"
+            operacao="UPDATE",
+            entidade="Cliente",
+            detalhes=f"Cliente {cliente_atualizado.nome} (ID: {id_cliente}) atualizado",
+            dados=dict(cliente)
         )
     )
     
@@ -180,37 +282,44 @@ async def atualizar_cliente(
 @router.delete("/{id_cliente}", status_code=status.HTTP_200_OK)
 @require_permission("clientes", "deletar")
 async def remover_cliente(
-    id_cliente: UUID,
+    id_cliente: UUID = Path(..., description="ID do cliente a ser removido"),
     id_empresa: UUID = Query(..., description="ID da empresa"),
     current_user: TokenPayload = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Remove um cliente.
+    Remove um cliente do sistema (inativação lógica).
     
-    - **id_cliente**: ID do cliente
+    - **id_cliente**: ID do cliente a ser removido
     - **id_empresa**: ID da empresa para validação
     
-    Retorna mensagem de confirmação.
+    Retorna confirmação de remoção.
     """
-    # Inicializar serviços
+    # Inicializar serviço
     cliente_service = ClienteService()
     log_service = LogSistemaService()
     
-    # Buscar cliente para o log antes de remover
-    cliente = await cliente_service.get_cliente(id_cliente, id_empresa)
+    # Verificar se cliente existe
+    cliente_existente = await cliente_service.get_cliente(id_cliente, id_empresa)
+    if not cliente_existente:
+        raise resource_not_found("cliente", id_cliente)
     
-    # Remover cliente
-    resultado = await cliente_service.remover_cliente(id_cliente, id_empresa)
+    # Remover cliente (inativação lógica)
+    await cliente_service.remover_cliente(id_cliente, id_empresa)
     
-    # Registrar log
+    # Registrar log de remoção
     await log_service.registrar_log(
         LogSistemaCreate(
             id_usuario=current_user.sub,
             id_empresa=id_empresa,
-            acao="cliente:exclusao",
-            descricao=f"Cliente {cliente.nome} (ID: {id_cliente}) removido"
+            operacao="DELETE",
+            entidade="Cliente",
+            detalhes=f"Cliente {cliente_existente.nome} (ID: {id_cliente}) removido do sistema",
+            dados={"id_cliente": str(id_cliente)}
         )
     )
     
-    return resultado 
+    return {
+        "message": "Cliente removido com sucesso",
+        "id": str(id_cliente)
+    } 

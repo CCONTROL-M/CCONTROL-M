@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_, and_, func, select
 from fastapi import HTTPException, status
 
-from app.models.parcela import Parcela
+from app.models.parcela import Parcela, ParcelaCompra, ParcelaVenda
 from app.models.lancamento import Lancamento
 from app.models.cliente import Cliente
 from app.schemas.parcela import ParcelaCreate, ParcelaUpdate, StatusParcela

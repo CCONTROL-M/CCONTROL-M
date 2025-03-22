@@ -7,9 +7,10 @@ from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from pydantic import ValidationError
+from sqlalchemy.orm import Session
 
 from app.config.settings import settings
-from app.database import db_async_session
+from app.database import db_async_session, get_db
 from app.schemas.token import TokenPayload
 from app.repositories.usuario_repository import UsuarioRepository
 
@@ -18,7 +19,6 @@ oauth2_scheme = OAuth2PasswordBearer(
     tokenUrl="/auth/login",
     scheme_name="JWT"
 )
-
 
 async def get_current_user(
     token: str = Depends(oauth2_scheme)
@@ -165,3 +165,29 @@ def check_permission(permission: str):
         return True
         
     return dependency 
+
+async def get_current_active_user(current_user: TokenPayload = Depends(get_current_user)):
+    """
+    Verifica se o usuário atual está ativo.
+    
+    Args:
+        current_user: Dados do usuário atual obtidos do token JWT
+        
+    Returns:
+        TokenPayload: Dados do usuário se estiver ativo
+        
+    Raises:
+        HTTPException: Se o usuário não estiver ativo
+    """
+    # Verificar se o usuário está ativo no repositório
+    async with db_async_session() as session:
+        usuario_repo = UsuarioRepository(session)
+        user = await usuario_repo.get_by_id(current_user.sub)
+        
+        if not user or not user.ativo:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuário inativo ou desativado",
+            )
+    
+    return current_user 

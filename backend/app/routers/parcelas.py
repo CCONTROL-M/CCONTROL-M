@@ -11,7 +11,8 @@ from app.services.parcela_service import ParcelaService
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
 from app.utils.pagination import PaginatedResponse, paginate
-from app.auth.dependencies import get_current_user, verify_permission
+from app.dependencies import get_current_user, get_current_active_user
+from app.utils.permissions import require_permission as verify_permission
 
 
 router = APIRouter(

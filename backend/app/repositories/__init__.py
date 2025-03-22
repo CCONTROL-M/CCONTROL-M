@@ -10,6 +10,7 @@ from .fornecedor_repository import FornecedorRepository
 from .conta_bancaria_repository import ContaBancariaRepository
 from .forma_pagamento_repository import FormaPagamentoRepository
 from .venda_repository import VendaRepository
+from .compra_repository import CompraRepository
 from .parcela_repository import ParcelaRepository
 from .produto_repository import ProdutoRepository
 from .log_sistema_repository import LogSistemaRepository
@@ -26,6 +27,7 @@ __all__ = [
     'FormaPagamentoRepository',
     'LancamentoRepository',
     'VendaRepository',
+    'CompraRepository',
     'ParcelaRepository',
     'ProdutoRepository',
     'LogSistemaRepository'

@@ -4,7 +4,7 @@ import re
 import json
 from datetime import datetime
 
-from app.core.config import settings
+from app.config.settings import settings
 
 
 class ValidationMiddleware:

@@ -11,13 +11,7 @@ import logging
 from app.dependencies import get_db, get_current_user, get_current_active_user
 from app.schemas.centro_custo import CentroCustoCreate, CentroCustoUpdate, CentroCustoResponse
 from app.schemas.pagination import PaginatedResponse, PaginationParams
-from app.services.centro_custo_service import (
-    create_centro_custo,
-    get_all_centros_custo,
-    get_centro_custo_by_id,
-    update_centro_custo,
-    delete_centro_custo
-)
+from app.services.centro_custo_service import CentroCustoService
 from app.schemas.usuario import UsuarioResponse
 
 # Configuração de logging
@@ -41,28 +35,33 @@ async def create_new_centro_custo(
     centro_custo_data: CentroCustoCreate = Body(...),
     db: Session = Depends(get_db),
     current_user: UsuarioResponse = Depends(get_current_active_user),
+    centro_custo_service: CentroCustoService = Depends()
 ):
     """
-    Cria um novo centro de custo com os dados fornecidos.
+    Cria um novo centro de custo no sistema.
     
-    O centro de custo pertencerá à empresa do usuário autenticado.
-    """
-    logger.info(f"Criando centro de custo: {centro_custo_data.descricao}")
-    
-    try:
-        # Garantir que o centro de custo será criado para a empresa do usuário
-        centro_custo_dict = centro_custo_data.model_dump()
-        centro_custo_dict["id_empresa"] = current_user.id_empresa
+    Args:
+        centro_custo_data: Dados do centro de custo a ser criado
+        current_user: Usuário autenticado
         
-        result = create_centro_custo(db, centro_custo_dict)
-        return result
+    Returns:
+        Centro de custo criado
+    """
+    try:
+        logger.info(f"Criando novo centro de custo: {centro_custo_data.nome}")
+        
+        # Criar centro de custo
+        novo_centro = await centro_custo_service.criar_centro_custo(
+            centro_custo_data, 
+            current_user.id
+        )
+        
+        return novo_centro
     except HTTPException as e:
-        # Repassar exceções HTTP
-        logger.warning(f"Erro ao criar centro de custo: {str(e)}")
-        raise
+        logger.error(f"Erro ao criar centro de custo: {str(e.detail)}")
+        raise e
     except Exception as e:
-        # Outras exceções viram 500
-        logger.error(f"Erro inesperado ao criar centro de custo: {str(e)}", exc_info=True)
+        logger.error(f"Erro inesperado ao criar centro de custo: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro interno ao processar a requisição"
@@ -82,41 +81,44 @@ async def list_centros_custo(
     pagination: PaginationParams = Depends(),
     db: Session = Depends(get_db),
     current_user: UsuarioResponse = Depends(get_current_active_user),
+    centro_custo_service: CentroCustoService = Depends()
 ):
     """
-    Lista centros de custo da empresa do usuário com suporte a paginação e filtros.
-    """
-    logger.info(f"Listando centros de custo. Filtros: descricao={descricao}, ativo={ativo}")
+    Lista centros de custo com paginação e filtros.
     
-    try:
-        # Montar filtros
-        filters = {
-            "id_empresa": current_user.id_empresa,
-        }
+    Args:
+        descricao: Filtrar por descrição
+        ativo: Filtrar por status
+        pagination: Parâmetros de paginação
+        current_user: Usuário autenticado
         
-        if descricao:
-            filters["descricao"] = descricao
-            
-        if ativo is not None:
-            filters["ativo"] = ativo
+    Returns:
+        Lista paginada de centros de custo
+    """
+    try:
+        logger.info(f"Listando centros de custo - Filtros: descricao={descricao}, ativo={ativo}")
         
         # Buscar centros de custo com paginação
-        centros_custo, total = get_all_centros_custo(
-            db, 
-            skip=pagination.skip, 
+        centros_custo, total = await centro_custo_service.listar_centros_custo(
+            id_empresa=current_user.id_empresa,
+            skip=pagination.skip,
             limit=pagination.limit,
-            filters=filters
+            nome=descricao,
+            ativo=ativo
         )
         
-        # Montar resposta paginada
-        return {
-            "items": centros_custo,
-            "total": total,
-            "page": pagination.page,
-            "size": pagination.limit
-        }
+        # Retornar resultado paginado
+        return PaginatedResponse.create(
+            items=centros_custo,
+            total=total,
+            page=pagination.page,
+            page_size=pagination.size
+        )
+    except HTTPException as e:
+        logger.error(f"Erro ao listar centros de custo: {str(e.detail)}")
+        raise e
     except Exception as e:
-        logger.error(f"Erro ao listar centros de custo: {str(e)}", exc_info=True)
+        logger.error(f"Erro inesperado ao listar centros de custo: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro interno ao processar a requisição"
@@ -134,38 +136,33 @@ async def get_centro_custo(
     id_centro_custo: UUID = Path(..., description="ID do centro de custo"),
     db: Session = Depends(get_db),
     current_user: UsuarioResponse = Depends(get_current_active_user),
+    centro_custo_service: CentroCustoService = Depends()
 ):
     """
-    Obtém os detalhes de um centro de custo específico pelo ID.
+    Obtém detalhes de um centro de custo pelo ID.
     
-    Verifica se o centro de custo pertence à empresa do usuário.
+    Args:
+        id_centro_custo: ID do centro de custo
+        current_user: Usuário autenticado
+        
+    Returns:
+        Detalhes do centro de custo
     """
-    logger.info(f"Buscando centro de custo ID: {id_centro_custo}")
-    
     try:
-        centro_custo = get_centro_custo_by_id(db, id_centro_custo)
+        logger.info(f"Buscando centro de custo: {id_centro_custo}")
         
-        if not centro_custo:
-            logger.warning(f"Centro de custo ID {id_centro_custo} não encontrado")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Centro de custo não encontrado"
-            )
+        # Buscar centro de custo pelo ID
+        centro_custo = await centro_custo_service.get_centro_custo(
+            id_centro_custo,
+            current_user.id_empresa
+        )
         
-        # Verificar se o centro de custo pertence à empresa do usuário
-        if centro_custo.id_empresa != current_user.id_empresa:
-            logger.warning(f"Acesso negado ao centro de custo ID {id_centro_custo} para usuário da empresa {current_user.id_empresa}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Acesso negado a este recurso"
-            )
-            
         return centro_custo
     except HTTPException as e:
-        # Repassar exceções HTTP
-        raise
+        logger.error(f"Erro ao buscar centro de custo: {str(e.detail)}")
+        raise e
     except Exception as e:
-        logger.error(f"Erro ao buscar centro de custo: {str(e)}", exc_info=True)
+        logger.error(f"Erro inesperado ao buscar centro de custo: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro interno ao processar a requisição"
@@ -184,40 +181,36 @@ async def update_centro_custo_endpoint(
     centro_custo_data: CentroCustoUpdate = Body(...),
     db: Session = Depends(get_db),
     current_user: UsuarioResponse = Depends(get_current_active_user),
+    centro_custo_service: CentroCustoService = Depends()
 ):
     """
-    Atualiza os dados de um centro de custo existente.
+    Atualiza um centro de custo existente.
     
-    Verifica se o centro de custo pertence à empresa do usuário.
+    Args:
+        id_centro_custo: ID do centro de custo
+        centro_custo_data: Dados atualizados do centro de custo
+        current_user: Usuário autenticado
+        
+    Returns:
+        Centro de custo atualizado
     """
-    logger.info(f"Atualizando centro de custo ID: {id_centro_custo}")
-    
     try:
-        # Verificar se o centro de custo existe e pertence à empresa do usuário
-        centro_custo = get_centro_custo_by_id(db, id_centro_custo)
+        logger.info(f"Atualizando centro de custo: {id_centro_custo}")
         
-        if not centro_custo:
-            logger.warning(f"Centro de custo ID {id_centro_custo} não encontrado")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Centro de custo não encontrado"
-            )
+        # Atualizar centro de custo
+        centro_atualizado = await centro_custo_service.atualizar_centro_custo(
+            id_centro_custo,
+            centro_custo_data,
+            current_user.id_empresa,
+            current_user.id
+        )
         
-        if centro_custo.id_empresa != current_user.id_empresa:
-            logger.warning(f"Acesso negado ao centro de custo ID {id_centro_custo} para usuário da empresa {current_user.id_empresa}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Acesso negado a este recurso"
-            )
-        
-        # Atualizar o centro de custo
-        updated = update_centro_custo(db, id_centro_custo, centro_custo_data.model_dump(exclude_unset=True))
-        return updated
+        return centro_atualizado
     except HTTPException as e:
-        # Repassar exceções HTTP
-        raise
+        logger.error(f"Erro ao atualizar centro de custo: {str(e.detail)}")
+        raise e
     except Exception as e:
-        logger.error(f"Erro ao atualizar centro de custo: {str(e)}", exc_info=True)
+        logger.error(f"Erro inesperado ao atualizar centro de custo: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro interno ao processar a requisição"
@@ -234,41 +227,31 @@ async def delete_centro_custo_endpoint(
     id_centro_custo: UUID = Path(..., description="ID do centro de custo"),
     db: Session = Depends(get_db),
     current_user: UsuarioResponse = Depends(get_current_active_user),
+    centro_custo_service: CentroCustoService = Depends()
 ):
     """
-    Remove um centro de custo existente do sistema.
+    Remove um centro de custo do sistema.
     
-    Verifica se o centro de custo pertence à empresa do usuário e se não há registros associados.
+    Args:
+        id_centro_custo: ID do centro de custo
+        current_user: Usuário autenticado
     """
-    logger.info(f"Removendo centro de custo ID: {id_centro_custo}")
-    
     try:
-        # Verificar se o centro de custo existe e pertence à empresa do usuário
-        centro_custo = get_centro_custo_by_id(db, id_centro_custo)
-        
-        if not centro_custo:
-            logger.warning(f"Centro de custo ID {id_centro_custo} não encontrado")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Centro de custo não encontrado"
-            )
-        
-        if centro_custo.id_empresa != current_user.id_empresa:
-            logger.warning(f"Acesso negado ao centro de custo ID {id_centro_custo} para usuário da empresa {current_user.id_empresa}")
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Acesso negado a este recurso"
-            )
+        logger.info(f"Removendo centro de custo: {id_centro_custo}")
         
         # Remover o centro de custo
-        delete_centro_custo(db, id_centro_custo)
+        await centro_custo_service.remover_centro_custo(
+            id_centro_custo,
+            current_user.id_empresa,
+            current_user.id
+        )
         
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     except HTTPException as e:
-        # Repassar exceções HTTP
-        raise
+        logger.error(f"Erro ao remover centro de custo: {str(e.detail)}")
+        raise e
     except Exception as e:
-        logger.error(f"Erro ao remover centro de custo: {str(e)}", exc_info=True)
+        logger.error(f"Erro inesperado ao remover centro de custo: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Erro interno ao processar a requisição"

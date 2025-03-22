@@ -16,8 +16,9 @@ from app.schemas.usuario import Usuario
 from app.services.lancamento_service import LancamentoService
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
-from app.utils.pagination import PaginatedResponse, paginate
-from app.auth.dependencies import get_current_user
+from app.schemas.pagination import PaginatedResponse
+from app.dependencies import get_current_user, get_current_active_user
+from app.utils.pagination import paginate
 from app.utils.permissions import require_permission
 
 

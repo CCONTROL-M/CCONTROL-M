@@ -17,6 +17,8 @@ import time
 from datetime import datetime
 import hashlib
 import secrets
+import base64
+from starlette.datastructures import MutableHeaders
 
 from app.config.settings import settings
 from app.utils.logging_config import get_logger
@@ -397,4 +399,102 @@ def create_security_middleware():
     Returns:
         Instância configurada do SecurityMiddleware
     """
-    return SecurityMiddleware 
+    async def security_middleware(request: Request, call_next):
+        """
+        Aplica cabeçalhos de segurança às respostas HTTP.
+        
+        Args:
+            request: Requisição HTTP
+            call_next: Próximo handler na cadeia de middlewares
+            
+        Returns:
+            Response: Resposta HTTP com cabeçalhos de segurança
+        """
+        # Validar autenticação básica para endpoint de métricas
+        if settings.METRICS_BASIC_AUTH and request.url.path == "/api/metrics":
+            auth_header = request.headers.get("Authorization")
+            if not auth_header or not auth_header.startswith("Basic "):
+                # Retornar erro 401 Unauthorized com cabeçalho WWW-Authenticate
+                headers = {"WWW-Authenticate": "Basic realm=\"Prometheus Metrics\""}
+                return create_error_response(401, "Unauthorized", "Autenticação necessária", headers)
+            
+            # Extrair e validar credenciais
+            encoded_credentials = auth_header.split(" ")[1]
+            try:
+                decoded = base64.b64decode(encoded_credentials).decode("utf-8")
+                username, password = decoded.split(":")
+                if username != settings.METRICS_USERNAME or password != settings.METRICS_PASSWORD:
+                    return create_error_response(401, "Unauthorized", "Credenciais inválidas")
+            except Exception:
+                return create_error_response(401, "Unauthorized", "Credenciais inválidas")
+        
+        # Processar requisição
+        response = await call_next(request)
+        
+        # Adicionar cabeçalhos de segurança, se habilitados
+        if settings.SECURITY_HEADERS:
+            headers = MutableHeaders(response.headers)
+            
+            # Prevenção contra ataques XSS
+            headers.append("X-XSS-Protection", "1; mode=block")
+            
+            # Prevenção contra ataques de sniffing de MIME type
+            headers.append("X-Content-Type-Options", "nosniff")
+            
+            # Prevenção contra ataques de clickjacking
+            headers.append("X-Frame-Options", "DENY")
+            
+            # Restrição de referrer para melhorar privacidade
+            headers.append("Referrer-Policy", "strict-origin-when-cross-origin")
+            
+            # CSP para restringir origens de recursos (básico)
+            # Em produção, esta política deve ser mais restritiva
+            if settings.APP_ENV == "production":
+                headers.append(
+                    "Content-Security-Policy",
+                    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; "
+                    "img-src 'self' data:; font-src 'self' data:; connect-src 'self'"
+                )
+            
+            # Permissões para recursos específicos
+            headers.append("Permissions-Policy", "camera=(), microphone=(), geolocation=(), interest-cohort=()")
+            
+            # HSTS para forçar HTTPS em navegadores (apenas em prod e se habilitado)
+            if settings.HSTS_ENABLED and settings.APP_ENV == "production":
+                headers.append(
+                    "Strict-Transport-Security",
+                    f"max-age={settings.HSTS_MAX_AGE}; includeSubDomains; preload"
+                )
+                
+            # Remover Server e X-Powered-By para reduzir fingerprinting
+            if "Server" in headers:
+                del headers["Server"]
+            if "X-Powered-By" in headers:
+                del headers["X-Powered-By"]
+        
+        return response
+    
+    return security_middleware
+
+
+def create_error_response(status_code: int, error: str, message: str, headers: dict = None):
+    """
+    Cria uma resposta de erro com cabeçalhos opcionais.
+    
+    Args:
+        status_code: Código de status HTTP
+        error: Tipo de erro
+        message: Mensagem de erro
+        headers: Cabeçalhos adicionais (opcional)
+        
+    Returns:
+        Resposta HTTP com erro formatado
+    """
+    from starlette.responses import JSONResponse
+    
+    content = {"error": error, "message": message}
+    return JSONResponse(
+        status_code=status_code,
+        content=content,
+        headers=headers or {}
+    ) 

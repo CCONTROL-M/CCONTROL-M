@@ -2,50 +2,53 @@
 from uuid import UUID
 from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Depends
 import logging
 
 from app.schemas.fornecedor import FornecedorCreate, FornecedorUpdate, Fornecedor
 from app.repositories.fornecedor_repository import FornecedorRepository
-from app.database import db_async_session
+from app.database import db_async_session, get_async_session
 from app.utils.validators import validar_cnpj
+from app.services.log_sistema_service import LogSistemaService
+from app.schemas.log_sistema import LogSistemaCreate
 
 
 class FornecedorService:
     """Serviço para gerenciamento de fornecedores."""
     
-    def __init__(self):
-        """Inicializar serviço com logger."""
+    def __init__(self, session: AsyncSession = Depends(get_async_session),
+                log_service: LogSistemaService = Depends()):
+        """Inicializar o serviço."""
+        self.repository = FornecedorRepository(session)
+        self.log_service = log_service
         self.logger = logging.getLogger(__name__)
-        
+    
     async def get_fornecedor(self, id_fornecedor: UUID, id_empresa: UUID) -> Fornecedor:
         """
-        Busca um fornecedor pelo ID.
+        Buscar fornecedor pelo ID com validação de empresa.
         
         Args:
             id_fornecedor: ID do fornecedor
             id_empresa: ID da empresa
             
         Returns:
-            Fornecedor: Dados do fornecedor
+            Fornecedor encontrado
             
         Raises:
             HTTPException: Se o fornecedor não for encontrado
         """
-        self.logger.info(f"Buscando fornecedor ID: {id_fornecedor}")
+        self.logger.info(f"Buscando fornecedor com ID: {id_fornecedor}")
         
-        async with db_async_session() as session:
-            repository = FornecedorRepository(session)
-            fornecedor = await repository.get_by_id(id_fornecedor, id_empresa)
-            
-            if not fornecedor:
-                self.logger.warning(f"Fornecedor não encontrado: {id_fornecedor}")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Fornecedor não encontrado"
-                )
-                
-            return fornecedor
+        fornecedor = await self.repository.get_by_id(id_fornecedor, id_empresa)
+        
+        if not fornecedor:
+            self.logger.warning(f"Fornecedor não encontrado: {id_fornecedor}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Fornecedor não encontrado com ID: {id_fornecedor}"
+            )
+        
+        return fornecedor
     
     async def listar_fornecedores(
         self,
@@ -54,176 +57,330 @@ class FornecedorService:
         limit: int = 100,
         nome: Optional[str] = None,
         cnpj: Optional[str] = None,
-        ativo: Optional[bool] = None,
-        avaliacao: Optional[int] = None
+        email: Optional[str] = None,
+        telefone: Optional[str] = None,
+        ativo: Optional[bool] = None
     ) -> Tuple[List[Fornecedor], int]:
         """
-        Lista fornecedores com filtros e paginação.
+        Listar fornecedores com filtros.
         
         Args:
             id_empresa: ID da empresa
             skip: Registros para pular
             limit: Limite de registros
-            nome: Filtrar por nome
-            cnpj: Filtrar por CNPJ
-            ativo: Filtrar por status (ativo/inativo)
-            avaliacao: Filtrar por avaliação
+            nome: Filtro por nome
+            cnpj: Filtro por CNPJ
+            email: Filtro por e-mail
+            telefone: Filtro por telefone
+            ativo: Filtro por status (ativo/inativo)
             
         Returns:
-            Tuple[List[Fornecedor], int]: Lista de fornecedores e contagem total
+            Lista de fornecedores e contagem total
         """
-        self.logger.info(f"Buscando fornecedores da empresa {id_empresa} com filtros: nome={nome}, cnpj={cnpj}")
+        self.logger.info(f"Listando fornecedores para empresa {id_empresa}")
         
-        async with db_async_session() as session:
-            repository = FornecedorRepository(session)
-            return await repository.list_with_filters(
+        # Construir filtros
+        filters = {}
+        if nome:
+            filters["nome"] = nome
+        if cnpj:
+            filters["cnpj"] = cnpj
+        if email:
+            filters["email"] = email
+        if telefone:
+            filters["telefone"] = telefone
+        if ativo is not None:
+            filters["ativo"] = ativo
+        
+        try:
+            fornecedores, total = await self.repository.list_with_filters(
                 skip=skip,
                 limit=limit,
                 id_empresa=id_empresa,
-                nome=nome,
-                cnpj=cnpj,
-                ativo=ativo,
-                avaliacao=avaliacao
+                **filters
+            )
+            
+            return fornecedores, total
+        except Exception as e:
+            self.logger.error(f"Erro ao listar fornecedores: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao listar fornecedores"
             )
     
-    async def criar_fornecedor(self, fornecedor: FornecedorCreate) -> Fornecedor:
+    async def criar_fornecedor(self, fornecedor: FornecedorCreate, id_usuario: UUID) -> Fornecedor:
         """
-        Cria um novo fornecedor.
+        Criar novo fornecedor com validações.
         
         Args:
             fornecedor: Dados do fornecedor
+            id_usuario: ID do usuário que está criando
             
         Returns:
-            Fornecedor: Dados do fornecedor criado
+            Fornecedor criado
             
         Raises:
-            HTTPException: Se ocorrer um erro na validação ou criação
+            HTTPException: Se houver erro de validação ou conflito
         """
-        self.logger.info(f"Criando fornecedor: {fornecedor.nome}")
+        self.logger.info(f"Criando fornecedor: {fornecedor.nome}, CNPJ: {fornecedor.cnpj}")
         
-        # Validar CNPJ se fornecido
-        if fornecedor.cnpj:
+        try:
+            # Validar CNPJ
             if not validar_cnpj(fornecedor.cnpj):
                 self.logger.warning(f"CNPJ inválido: {fornecedor.cnpj}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="CNPJ inválido"
                 )
-        
-        # Preparar dados
-        fornecedor_data = fornecedor.dict()
-        
-        # Criar fornecedor no repositório
-        async with db_async_session() as session:
-            repository = FornecedorRepository(session)
-            try:
-                return await repository.create_fornecedor(fornecedor_data)
-            except HTTPException as e:
-                self.logger.warning(f"Erro ao criar fornecedor: {e.detail}")
-                raise e
-            except Exception as e:
-                self.logger.error(f"Erro ao criar fornecedor: {str(e)}")
+            
+            # Verificar se já existe fornecedor com mesmo CNPJ na empresa
+            existente = await self.repository.get_by_cnpj_empresa(
+                cnpj=fornecedor.cnpj, 
+                id_empresa=fornecedor.id_empresa
+            )
+            
+            if existente:
+                self.logger.warning(f"CNPJ já cadastrado: {fornecedor.cnpj}")
                 raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Erro ao criar fornecedor"
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="CNPJ já cadastrado para outro fornecedor nesta empresa"
                 )
+            
+            # Criar fornecedor
+            fornecedor_dict = fornecedor.model_dump(exclude_unset=True)
+            novo_fornecedor = await self.repository.create(fornecedor_dict)
+            
+            # Registrar log
+            log = LogSistemaCreate(
+                acao="criar",
+                tabela="fornecedores",
+                id_registro=str(novo_fornecedor.id_fornecedor),
+                id_usuario=id_usuario,
+                id_empresa=fornecedor.id_empresa,
+                detalhes=f"Fornecedor {novo_fornecedor.nome} criado"
+            )
+            await self.log_service.registrar_log(log)
+            
+            # Comitar alterações
+            await self.repository.commit()
+            
+            return novo_fornecedor
+        except HTTPException:
+            await self.repository.rollback()
+            raise
+        except Exception as e:
+            await self.repository.rollback()
+            self.logger.error(f"Erro ao criar fornecedor: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao criar fornecedor: {str(e)}"
+            )
     
-    async def atualizar_fornecedor(self, id_fornecedor: UUID, fornecedor: FornecedorUpdate, id_empresa: UUID) -> Fornecedor:
+    async def atualizar_fornecedor(
+        self, 
+        id_fornecedor: UUID, 
+        fornecedor: FornecedorUpdate, 
+        id_empresa: UUID,
+        id_usuario: UUID
+    ) -> Fornecedor:
         """
-        Atualiza um fornecedor existente.
+        Atualizar fornecedor existente com validações.
         
         Args:
             id_fornecedor: ID do fornecedor
-            fornecedor: Dados atualizados
-            id_empresa: ID da empresa
+            fornecedor: Dados para atualização
+            id_empresa: ID da empresa para validação
+            id_usuario: ID do usuário que está atualizando
             
         Returns:
-            Fornecedor: Dados do fornecedor atualizado
+            Fornecedor atualizado
             
         Raises:
-            HTTPException: Se ocorrer um erro na validação ou atualização
+            HTTPException: Se houver erro de validação ou o fornecedor não for encontrado
         """
-        self.logger.info(f"Atualizando fornecedor: {id_fornecedor}")
+        self.logger.info(f"Atualizando fornecedor ID: {id_fornecedor}")
         
-        async with db_async_session() as session:
-            repository = FornecedorRepository(session)
-            
+        try:
             # Verificar se o fornecedor existe
-            fornecedor_atual = await repository.get_by_id(id_fornecedor, id_empresa)
-            if not fornecedor_atual:
-                self.logger.warning(f"Fornecedor não encontrado: {id_fornecedor}")
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Fornecedor não encontrado"
-                )
+            await self.get_fornecedor(id_fornecedor, id_empresa)
             
-            # Validar CNPJ se estiver sendo atualizado
-            update_data = fornecedor.dict(exclude_unset=True)
-            if "cnpj" in update_data and update_data["cnpj"]:
-                if not validar_cnpj(update_data["cnpj"]):
-                    self.logger.warning(f"CNPJ inválido: {update_data['cnpj']}")
+            # Validar CNPJ, se fornecido
+            if fornecedor.cnpj:
+                if not validar_cnpj(fornecedor.cnpj):
+                    self.logger.warning(f"CNPJ inválido: {fornecedor.cnpj}")
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
                         detail="CNPJ inválido"
                     )
-            
-            # Atualizar fornecedor
-            try:
-                fornecedor_atualizado = await repository.update_fornecedor(
-                    id_fornecedor=id_fornecedor,
-                    data=update_data,
+                
+                # Verificar se o CNPJ já está em uso por outro fornecedor
+                existente = await self.repository.get_by_cnpj_empresa(
+                    cnpj=fornecedor.cnpj, 
                     id_empresa=id_empresa
                 )
-                return fornecedor_atualizado
-            except HTTPException as e:
-                self.logger.warning(f"Erro ao atualizar fornecedor: {e.detail}")
-                raise e
-            except Exception as e:
-                self.logger.error(f"Erro ao atualizar fornecedor: {str(e)}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Erro ao atualizar fornecedor"
-                )
-    
-    async def remover_fornecedor(self, id_fornecedor: UUID, id_empresa: UUID) -> Dict[str, Any]:
-        """
-        Remove um fornecedor.
-        
-        Args:
-            id_fornecedor: ID do fornecedor
-            id_empresa: ID da empresa
+                
+                if existente and existente.id_fornecedor != id_fornecedor:
+                    self.logger.warning(f"CNPJ já cadastrado: {fornecedor.cnpj}")
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="CNPJ já cadastrado para outro fornecedor"
+                    )
             
-        Returns:
-            Dict[str, Any]: Mensagem de sucesso
+            # Preparar dados para atualização
+            fornecedor_dict = fornecedor.model_dump(exclude_unset=True)
             
-        Raises:
-            HTTPException: Se ocorrer um erro na remoção
-        """
-        self.logger.info(f"Removendo fornecedor: {id_fornecedor}")
-        
-        async with db_async_session() as session:
-            repository = FornecedorRepository(session)
+            # Atualizar fornecedor
+            fornecedor_atualizado = await self.repository.update(
+                id_fornecedor=id_fornecedor,
+                data=fornecedor_dict,
+                id_empresa=id_empresa
+            )
             
-            # Verificar se o fornecedor existe
-            fornecedor = await repository.get_by_id(id_fornecedor, id_empresa)
-            if not fornecedor:
-                self.logger.warning(f"Fornecedor não encontrado: {id_fornecedor}")
+            if not fornecedor_atualizado:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Fornecedor não encontrado"
                 )
             
-            # Verificar se o fornecedor está sendo usado em lançamentos ou compras
-            # TODO: Implementar verificação de uso quando repository estiver atualizado
+            # Registrar log
+            log = LogSistemaCreate(
+                acao="atualizar",
+                tabela="fornecedores",
+                id_registro=str(id_fornecedor),
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                detalhes=f"Fornecedor {fornecedor_atualizado.nome} atualizado"
+            )
+            await self.log_service.registrar_log(log)
             
-            # Tentar remover o fornecedor
-            resultado = await repository.delete(id_fornecedor, id_empresa)
+            # Comitar alterações
+            await self.repository.commit()
             
+            return fornecedor_atualizado
+        except HTTPException:
+            await self.repository.rollback()
+            raise
+        except Exception as e:
+            await self.repository.rollback()
+            self.logger.error(f"Erro ao atualizar fornecedor: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao atualizar fornecedor: {str(e)}"
+            )
+    
+    async def remover_fornecedor(self, id_fornecedor: UUID, id_empresa: UUID, id_usuario: UUID) -> Dict[str, Any]:
+        """
+        Remover fornecedor pelo ID.
+        
+        Args:
+            id_fornecedor: ID do fornecedor
+            id_empresa: ID da empresa para validação
+            id_usuario: ID do usuário que está removendo
+            
+        Returns:
+            Mensagem de confirmação
+            
+        Raises:
+            HTTPException: Se o fornecedor não for encontrado ou não puder ser removido
+        """
+        self.logger.info(f"Removendo fornecedor ID: {id_fornecedor}")
+        
+        try:
+            # Verificar se o fornecedor existe
+            fornecedor = await self.get_fornecedor(id_fornecedor, id_empresa)
+            
+            # Verificar se existem relações que impedem a remoção
+            # Exemplo: pedidos, contas a pagar, etc.
+            # TODO: Implementar verificações de relações
+            
+            # Remover fornecedor
+            resultado = await self.repository.delete(id_fornecedor, id_empresa)
             if not resultado:
-                self.logger.error(f"Erro ao remover fornecedor: {id_fornecedor}")
                 raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Erro ao remover fornecedor"
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Fornecedor não encontrado"
                 )
             
-            return {"message": "Fornecedor removido com sucesso"} 
+            # Registrar log
+            log = LogSistemaCreate(
+                acao="remover",
+                tabela="fornecedores",
+                id_registro=str(id_fornecedor),
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                detalhes=f"Fornecedor {fornecedor.nome} removido"
+            )
+            await self.log_service.registrar_log(log)
+            
+            # Comitar alterações
+            await self.repository.commit()
+            
+            return {"mensagem": "Fornecedor removido com sucesso"}
+        except HTTPException:
+            await self.repository.rollback()
+            raise
+        except Exception as e:
+            await self.repository.rollback()
+            self.logger.error(f"Erro ao remover fornecedor: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao remover fornecedor: {str(e)}"
+            )
+            
+    async def desativar_fornecedor(self, id_fornecedor: UUID, id_empresa: UUID, id_usuario: UUID) -> Fornecedor:
+        """
+        Desativar um fornecedor (alternar status para inativo).
+        
+        Args:
+            id_fornecedor: ID do fornecedor
+            id_empresa: ID da empresa para validação
+            id_usuario: ID do usuário que está desativando
+            
+        Returns:
+            Fornecedor desativado
+            
+        Raises:
+            HTTPException: Se o fornecedor não for encontrado
+        """
+        self.logger.info(f"Desativando fornecedor ID: {id_fornecedor}")
+        
+        try:
+            # Verificar se o fornecedor existe
+            fornecedor = await self.get_fornecedor(id_fornecedor, id_empresa)
+            
+            # Se já estiver inativo, não precisa fazer nada
+            if not fornecedor.ativo:
+                return fornecedor
+            
+            # Atualizar status para inativo
+            fornecedor_atualizado = await self.repository.update(
+                id_fornecedor=id_fornecedor,
+                data={"ativo": False},
+                id_empresa=id_empresa
+            )
+            
+            # Registrar log
+            log = LogSistemaCreate(
+                acao="desativar",
+                tabela="fornecedores",
+                id_registro=str(id_fornecedor),
+                id_usuario=id_usuario,
+                id_empresa=id_empresa,
+                detalhes=f"Fornecedor {fornecedor.nome} desativado"
+            )
+            await self.log_service.registrar_log(log)
+            
+            # Comitar alterações
+            await self.repository.commit()
+            
+            return fornecedor_atualizado
+        except HTTPException:
+            await self.repository.rollback()
+            raise
+        except Exception as e:
+            await self.repository.rollback()
+            self.logger.error(f"Erro ao desativar fornecedor: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao desativar fornecedor: {str(e)}"
+            ) 

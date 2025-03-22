@@ -23,6 +23,16 @@ class FornecedorBase(BaseModel):
         return validar_cnpj(v)
 
 
+class FornecedorBasico(BaseModel):
+    """Modelo básico para relacionamentos com fornecedores."""
+    id_fornecedor: UUID
+    nome: str
+    cnpj: str
+    
+    class Config:
+        from_attributes = True
+
+
 class FornecedorCreate(FornecedorBase):
     """Modelo para criação de fornecedores."""
     pass

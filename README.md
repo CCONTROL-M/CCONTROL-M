@@ -1,164 +1,143 @@
-# CCONTROL-M - Sistema de Controle Financeiro
+# CCONTROL-M - Sistema de Controle Empresarial
 
-Sistema de controle financeiro com suporte a multi-tenancy e recursos de segurança aprimorados.
+## 📋 Sobre o Projeto
 
-## Arquivos de Configuração
+CCONTROL-M é um sistema de controle empresarial completo desenvolvido em Python usando FastAPI. O sistema oferece funcionalidades para gestão de produtos, vendas, clientes, fornecedores, controle financeiro e geração de relatórios.
 
-### Variáveis de Ambiente
+## 🚀 Tecnologias
 
-O sistema utiliza variáveis de ambiente para configuração. Um modelo dessas variáveis está disponível em `.env.example`. Para configurar o sistema:
+- **Backend**: Python 3.8+, FastAPI, SQLAlchemy, PostgreSQL
+- **Segurança**: JWT, OAuth2, CORS, Rate Limiting
+- **Documentação**: OpenAPI (Swagger), ReDoc
+- **Monitoramento**: Prometheus, Grafana
+- **CI/CD**: GitHub Actions
+- **Containerização**: Docker, Docker Compose
 
-1. Copie o arquivo `.env.example` para `.env`
-2. Preencha com os valores reais do seu ambiente
+## 🛠️ Requisitos
 
-**IMPORTANTE:** O arquivo `.env` contém informações sensíveis e nunca deve ser commitado no repositório Git. Ele já está adicionado ao `.gitignore`.
+- Python 3.8+
+- PostgreSQL 13+
+- Docker e Docker Compose (opcional)
+- wkhtmltopdf (para geração de PDFs)
 
-## Scripts de Manutenção
+## 📦 Instalação
 
-### Backup do Banco de Dados
+### Desenvolvimento Local
 
-O script `backend/backup_database.py` realiza backups completos do banco de dados PostgreSQL:
-
+1. Clone o repositório:
 ```bash
-python backend/backup_database.py [--only-structure] [--only-data] [--keep-backups N]
+git clone https://github.com/CCONTROL-M/CCONTROL-M.git
+cd CCONTROL-M
 ```
 
-Opções:
-- `--only-structure`: Faz backup apenas da estrutura (schemas, tabelas, etc.)
-- `--only-data`: Faz backup apenas dos dados
-- `--keep-backups N`: Mantém apenas os últimos N backups diários (padrão: 10)
-
-Os backups são comprimidos e organizados por data em `backend/backups/`.
-
-### Validação de Integridade do Banco de Dados
-
-O script `backend/validate_db_integrity.py` verifica a integridade do banco de dados:
-
+2. Configure o ambiente virtual:
 ```bash
-python backend/validate_db_integrity.py
+python -m venv venv
+source venv/bin/activate  # Linux/macOS
+.\venv\Scripts\activate   # Windows
 ```
 
-Este script busca por:
-- Registros órfãos (com chaves estrangeiras inválidas)
-- Inconsistências nos relacionamentos (vendas, parcelas, etc.)
-- Dados duplicados (CPF/CNPJ, emails, etc.)
-
-Os relatórios de validação são gerados no formato JSON na pasta `logs/`.
-
-### Verificação de Consistência Financeira
-
-O script `backend/check_financial_consistency.py` verifica a consistência dos dados financeiros:
-
+3. Instale as dependências:
 ```bash
-python backend/check_financial_consistency.py [--fix]
+cd backend
+pip install -r requirements.txt
 ```
 
-Opções:
-- `--fix`: Corrige automaticamente as inconsistências encontradas
-
-Este script verifica e corrige:
-- Vendas parceladas sem parcelas
-- Inconsistências entre valor total de vendas e soma das parcelas
-- Lançamentos com referências inválidas
-- Parcelas pagas sem lançamentos correspondentes
-
-Os relatórios são gerados no formato JSON na pasta `logs/`.
-
-## Configuração de Multi-Tenancy
-
-### Isolamento por Tenant (Empresa)
-
-O script `backend/setup_tenant_isolation.py` configura o isolamento por tenant no banco de dados:
-
+4. Configure as variáveis de ambiente:
 ```bash
-python backend/setup_tenant_isolation.py
+cp .env.example .env
+# Edite o arquivo .env com suas configurações
 ```
 
-Este script implementa:
-- Funções para obter e definir o tenant atual
-- Triggers para garantir que registros sejam inseridos no tenant correto
-- Validações para evitar operações entre tenants diferentes
-- Funções de API para manipulação de tenants
-
-### Configuração de Políticas RLS
-
-O script `backend/configure_rls_policies.py` configura as políticas de Row-Level Security:
-
+5. Execute as migrações:
 ```bash
-python backend/configure_rls_policies.py
+alembic upgrade head
 ```
 
-Este script:
-- Faz backup das políticas RLS existentes
-- Padroniza as políticas para todas as tabelas
-- Configura políticas específicas para casos especiais
+6. Inicie o servidor de desenvolvimento:
+```bash
+uvicorn app.main:app --reload
+```
 
-## Segurança
+### Usando Docker
 
-O sistema implementa diversas camadas de segurança:
+1. Construa e inicie os containers:
+```bash
+docker-compose up -d --build
+```
 
-1. **Isolamento de Tenants**: Dados de uma empresa são completamente isolados de outras empresas
-2. **Políticas RLS**: Controle de acesso granular no nível do banco de dados
-3. **Autenticação JWT**: Autenticação segura com tokens JWT
-4. **Variáveis de Ambiente**: Informações sensíveis armazenadas em variáveis de ambiente
-5. **Backups Regulares**: Sistema de backup automatizado
+## 📚 Documentação
 
-## Estrutura do Banco de Dados
+- [Guia de Início Rápido](docs/guides/quickstart.md)
+- [Documentação da API](docs/api/README.md)
+- [Arquitetura](docs/architecture/README.md)
+- [Guia de Desenvolvimento](docs/guides/development.md)
+- [Catálogo de Erros](docs/errors/README.md)
 
-O banco de dados utiliza PostgreSQL e está estruturado em quatro esquemas principais:
+## 🔐 Segurança
 
-- `public`: Tabelas principais do aplicativo
-- `auth`: Tabelas relacionadas à autenticação (gerenciadas pelo Supabase)
-- `storage`: Armazenamento de arquivos (gerenciado pelo Supabase)
-- `migration_history`: Histórico de migrações e backups de configurações
+O sistema implementa várias camadas de segurança:
 
-## Desenvolvimento
+- Autenticação JWT
+- Rate Limiting
+- CORS configurável
+- Validação de inputs
+- Auditoria de ações
+- Row Level Security (RLS)
 
-### Requisitos
+## 🧪 Testes
 
-- Python 3.10+
-- PostgreSQL 14+
-- Supabase (para autenticação e armazenamento)
+Execute os testes com:
 
-### Configuração do Ambiente de Desenvolvimento
+```bash
+# Testes unitários
+pytest
 
-1. Crie um ambiente virtual Python:
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # No Windows: venv\Scripts\activate
-   ```
+# Com cobertura
+pytest --cov=app
 
-2. Instale as dependências:
-   ```bash
-   pip install -r backend/requirements.txt
-   ```
+# Testes específicos
+pytest tests/test_specific.py
+```
 
-3. Configure o arquivo `.env` conforme o modelo em `.env.example`
+## 📊 Monitoramento
 
-4. Execute as migrações:
-   ```bash
-   python backend/alembic upgrade head
-   ```
+- Métricas: `/metrics` (Prometheus)
+- Health Check: `/health`
+- Logs: Configurados para stdout/arquivo
 
-5. Inicie o servidor de desenvolvimento:
-   ```bash
-   python backend/main.py
-   ```
+## 🚢 Deploy
 
-## Produção
+1. Produção com Docker:
+```bash
+docker-compose -f docker-compose.prod.yml up -d
+```
 
-Para implantação em produção, siga estas práticas recomendadas:
+2. Sem Docker:
+```bash
+./scripts/setup-production.sh
+```
 
-1. Use um proxy reverso (Nginx, Traefik) com SSL
-2. Configure variáveis de ambiente específicas para produção
-3. Ative o modo de produção nas configurações
-4. Configure backups automatizados usando um agendador (cron, Task Scheduler)
-5. Monitore os logs da aplicação regularmente
+## 🤝 Contribuindo
 
-## Contribuição
+1. Fork o projeto
+2. Crie uma branch para sua feature (`git checkout -b feature/AmazingFeature`)
+3. Commit suas mudanças (`git commit -m 'Add: nova feature'`)
+4. Push para a branch (`git push origin feature/AmazingFeature`)
+5. Abra um Pull Request
 
-1. Faça um fork do repositório
-2. Crie uma branch para sua feature (`git checkout -b feature/nova-funcionalidade`)
-3. Faça commit das suas alterações (`git commit -am 'Adiciona nova funcionalidade'`)
-4. Envie para o repositório remoto (`git push origin feature/nova-funcionalidade`)
-5. Crie um Pull Request 
+## 📄 Licença
+
+Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+## 📞 Suporte
+
+- Documentação: [docs/](docs/)
+- Issues: [GitHub Issues](https://github.com/CCONTROL-M/CCONTROL-M/issues)
+- Email: ricardoe@conectamoveis.net.br
+
+## ⚡ Status do Projeto
+
+![CI/CD](https://github.com/CCONTROL-M/CCONTROL-M/workflows/CI/CD/badge.svg)
+![Tests](https://github.com/CCONTROL-M/CCONTROL-M/workflows/Tests/badge.svg)
+![Coverage](https://codecov.io/gh/CCONTROL-M/CCONTROL-M/branch/master/graph/badge.svg) 

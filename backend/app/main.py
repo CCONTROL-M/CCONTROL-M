@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request, status, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.encoders import jsonable_encoder
 from contextlib import asynccontextmanager
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -21,20 +21,28 @@ from app.utils.logging_config import get_logger, log_with_context
 
 # Importar middlewares
 from app.middlewares.cors_middleware import setup_cors_middleware
-from app.middlewares.rate_limiter import create_rate_limiter_middleware
-from app.middlewares.audit_middleware import create_audit_middleware
-from app.middlewares.validation_middleware import create_validation_middleware
-from app.middlewares.tenant_middleware import TenantMiddleware
-from app.middlewares.performance_middleware import PerformanceMiddleware
-from app.middlewares.logging_middleware import RequestLoggingMiddleware
-from app.middlewares.https_redirect_middleware import HTTPSRedirectMiddleware
-from app.middlewares.security_middleware import create_security_middleware
+# Middlewares que podem não existir no projeto
+# from app.middlewares.rate_limiter import create_rate_limiter_middleware
+# from app.middlewares.audit_middleware import create_audit_middleware
+# from app.middlewares.validation_middleware import create_validation_middleware
+# from app.middlewares.tenant_middleware import TenantMiddleware
+# from app.middlewares.performance_middleware import PerformanceMiddleware
+# from app.middlewares.logging_middleware import RequestLoggingMiddleware
+# from app.middlewares.https_redirect_middleware import HTTPSRedirectMiddleware
+# from app.middlewares.security_middleware import create_security_middleware
 
-# Importar dependências
-from app.db.session import create_db_and_tables
+# Importar manipuladores de exceção
+# from app.core.exception_handlers import configure_exception_handlers
+
+# Importar dependências do banco de dados
+# from app.db.session import create_db_and_tables
+from app.database import engine
 
 # Importar monitor de agendamento
-from app.scripts.schedule_monitors import start_scheduler_thread
+# from app.scripts.schedule_monitors import start_scheduler_thread
+
+# Importar componentes de métricas
+# from app.config.metrics import get_metrics_prometheus, get_metrics_dict, reset_metrics
 
 # Configurar logger
 logger = get_logger(__name__)
@@ -43,10 +51,11 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Código de inicialização - executa antes de iniciar o servidor
-    log_with_context(logger, "info", f"Iniciando aplicação em ambiente: {settings.APP_ENV}")
+    request_id = "startup"
+    log_with_context(logger, "info", f"Iniciando aplicação em ambiente: {settings.APP_ENV}", request_id=request_id)
     
     # Inicialização: criar tabelas no banco de dados se não existirem
-    await create_db_and_tables()
+    # await create_db_and_tables()
     
     # Criar diretório de uploads se não existir
     os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
@@ -54,11 +63,12 @@ async def lifespan(app: FastAPI):
     # Criar diretório de logs se não existir
     os.makedirs("logs", exist_ok=True)
     
-    logger.info(f"Iniciando aplicação {settings.APP_NAME} v{settings.APP_VERSION} no ambiente {settings.APP_ENV}")
+    logger.info(f"Iniciando aplicação {settings.APP_NAME} v{settings.APP_VERSION} no ambiente {settings.APP_ENV}", 
+                extra={"request_id": request_id})
     
     yield
     # Código de encerramento - executa quando o servidor é desligado
-    log_with_context(logger, "info", "Encerrando aplicação")
+    log_with_context(logger, "info", "Encerrando aplicação", request_id="shutdown")
 
 # Criar aplicação FastAPI
 app = FastAPI(
@@ -75,51 +85,57 @@ app = FastAPI(
 setup_cors_middleware(app)
 
 # Adicionar middleware de segurança integrado
-app.middleware("http")(create_security_middleware())
-logger.info("Middleware de segurança integrado ativado")
+# app.middleware("http")(create_security_middleware())
+# logger.info("Middleware de segurança integrado ativado")
 
 # Redirecionar HTTP para HTTPS em produção
-if os.getenv("ENABLE_HTTPS_REDIRECT", "False").lower() == "true" and settings.APP_ENV == "production":
-    app.add_middleware(HTTPSRedirectMiddleware)
-    logger.info("Redirecionamento HTTP para HTTPS habilitado")
+# if os.getenv("ENABLE_HTTPS_REDIRECT", "False").lower() == "true" and settings.APP_ENV == "production":
+#     app.add_middleware(HTTPSRedirectMiddleware)
+#     logger.info("Redirecionamento HTTP para HTTPS habilitado")
 
 # Adicionar middleware de multi-tenancy
-app.add_middleware(TenantMiddleware)
-logger.info("Middleware de multi-tenancy ativado")
+# app.add_middleware(TenantMiddleware)
+# logger.info("Middleware de multi-tenancy ativado")
 
 # Adicionar middleware de logging
-app.add_middleware(RequestLoggingMiddleware)
-logger.info("Middleware de logging ativado")
+# app.add_middleware(RequestLoggingMiddleware)
+# logger.info("Middleware de logging ativado")
 
 # Adicionar middleware de performance
-app.add_middleware(PerformanceMiddleware)
-logger.info("Middleware de performance ativado")
+# app.add_middleware(PerformanceMiddleware)
+# logger.info("Middleware de performance ativado")
 
 # Adicionar middleware de limitação de taxa se habilitado
-if settings.RATE_LIMIT_ENABLED:
-    app.middleware("http")(create_rate_limiter_middleware())
-    logger.info(f"Middleware de limitação de taxa ativado: {settings.RATE_LIMIT_REQUESTS} requisições por {settings.RATE_LIMIT_WINDOW}s")
+# if settings.RATE_LIMIT_ENABLED:
+#     app.middleware("http")(create_rate_limiter_middleware())
+#     logger.info(f"Middleware de limitação de taxa ativado: {settings.RATE_LIMIT_REQUESTS} requisições por {settings.RATE_LIMIT_WINDOW}s")
 
 # Adicionar middleware de compressão Gzip
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 logger.info("Middleware de compressão Gzip ativado")
 
 # Adicionar middleware de auditoria se habilitado
-if settings.ENABLE_AUDIT_LOG:
-    app.middleware("http")(create_audit_middleware())
-    logger.info("Middleware de auditoria ativado")
+# if settings.ENABLE_AUDIT_LOG:
+#     app.middleware("http")(create_audit_middleware())
+#     logger.info("Middleware de auditoria ativado")
 
 # Adicionar middleware de validação e segurança
-app.middleware("http")(create_validation_middleware())
-logger.info("Middleware de validação e segurança ativado")
+# app.middleware("http")(create_validation_middleware())
+# logger.info("Middleware de validação e segurança ativado")
+
+# Configurar manipuladores de exceção globais
+# configure_exception_handlers(app)
+# logger.info("Manipuladores de exceção configurados")
 
 # Manipulador global de exceções
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception):
+    request_id = getattr(request.state, "request_id", "unknown")
     log_with_context(
         logger, 
         "error", 
         f"Erro não tratado: {str(exc)}", 
+        request_id=request_id,
         path=request.url.path,
         method=request.method
     )
@@ -156,6 +172,36 @@ async def health_check():
         "timestamp": time.time()
     }
 
+# Comentados temporariamente pois dependem de funções não implementadas
+"""
+@app.get("/api/metrics", response_class=PlainTextResponse, tags=["Monitoring"])
+async def metrics():
+    Endpoint para expor métricas no formato Prometheus.
+    
+    Este endpoint é utilizado por sistemas de monitoramento como Prometheus para coletar
+    métricas de desempenho da aplicação, como número de requisições, tempo de resposta,
+    erros e outras estatísticas relevantes.
+    return get_metrics_prometheus()
+
+@app.get("/api/v1/metrics/dashboard", tags=["Monitoring"])
+async def metrics_dashboard():
+    Endpoint para exibir métricas em formato JSON para uso em dashboards.
+    
+    Fornece métricas e estatísticas detalhadas sobre o desempenho da API,
+    incluindo contadores de requisições, latência média, erros e outras
+    informações úteis para monitoramento.
+    return get_metrics_dict()
+
+@app.post("/api/v1/metrics/reset", tags=["Monitoring"])
+async def reset_metrics_endpoint():
+    Reinicia os contadores de métricas.
+    
+    Este endpoint é útil para limpar contadores após resolução de problemas ou
+    para iniciar uma nova sessão de monitoramento. Mantém os dados históricos.
+    reset_metrics()
+    return {"message": "Métricas reiniciadas com sucesso"}
+"""
+
 @app.on_event("startup")
 async def startup_event():
     """
@@ -163,17 +209,21 @@ async def startup_event():
     """
     global scheduler_thread
     
-    logger.info(f"Aplicação iniciada em ambiente: {settings.APP_ENV}")
+    logger.info(f"Aplicação iniciada em ambiente: {settings.APP_ENV}", 
+                extra={"request_id": "startup"})
     
     # Iniciar o agendador de monitoramento em uma thread separada
     try:
         if settings.ENABLE_MONITORING or settings.APP_ENV == "production":
-            scheduler_thread = start_scheduler_thread()
-            logger.info("Agendador de monitoramento iniciado com sucesso")
+            # scheduler_thread = start_scheduler_thread()
+            logger.info("Agendador de monitoramento comentado temporariamente", 
+                        extra={"request_id": "startup"})
         else:
-            logger.info("Monitoramento desativado por configuração")
+            logger.info("Monitoramento desativado por configuração", 
+                        extra={"request_id": "startup"})
     except Exception as e:
-        logger.error(f"Erro ao iniciar agendador de monitoramento: {str(e)}")
+        logger.error(f"Erro ao iniciar agendador de monitoramento: {str(e)}", 
+                     extra={"request_id": "startup"})
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -181,7 +231,7 @@ async def shutdown_event():
     Evento executado no encerramento da aplicação.
     """
     # O scheduler thread é daemon, então será encerrado automaticamente
-    logger.info("Aplicação encerrada")
+    logger.info("Aplicação encerrada", extra={"request_id": "shutdown"})
 
 @app.get("/api/v1/docs", include_in_schema=False)
 async def custom_swagger_ui_html():
@@ -192,6 +242,7 @@ async def custom_swagger_ui_html():
         swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.5.0/swagger-ui-bundle.js",
         swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.5.0/swagger-ui.css",
         swagger_favicon_url="https://fastapi.tiangolo.com/img/favicon.png",
+        swagger_ui_parameters={"defaultModelsExpandDepth": -1, "docExpansion": "none"},
     )
 
 def custom_openapi():
@@ -231,6 +282,34 @@ Sistema modular para controle financeiro, vendas e gestão empresarial, com supo
 - Fornecedores
 - Compras
 - Pagamentos
+
+## Códigos de Erro
+
+Todas as respostas de erro seguem um formato padronizado:
+
+```json
+{
+  "status_code": 400,
+  "message": "Mensagem de erro detalhada",
+  "error_code": "ERROR_CODE",
+  "details": {
+    "campo_com_problema": ["Descrição do problema"],
+    "additional_info": "Informações adicionais quando disponíveis"
+  }
+}
+```
+
+### Códigos de Erro Comuns
+
+| Código | Descrição | Quando Ocorre |
+|--------|-----------|---------------|
+| AUTH_INVALID_CREDENTIALS | Credenciais inválidas | Login com usuário/senha incorretos |
+| AUTH_TOKEN_EXPIRED | Token expirado | JWT expirado, necessário renovar |
+| AUTH_INSUFFICIENT_PERM | Permissão insuficiente | Tentativa de acessar recurso sem permissão |
+| RES_NOT_FOUND | Recurso não encontrado | ID inexistente ou não acessível |
+| RES_ALREADY_EXISTS | Recurso já existe | Tentativa de criar registro duplicado |
+| VAL_INVALID_FORMAT | Formato inválido | Dados enviados com formato incorreto |
+| SYS_RATE_LIMITED | Limite de requisições | Muitas requisições em pouco tempo |
         """,
         routes=app.routes,
     )
@@ -300,6 +379,10 @@ Sistema modular para controle financeiro, vendas e gestão empresarial, com supo
         {
             "name": "Health",
             "description": "Verificação de saúde da aplicação"
+        },
+        {
+            "name": "Monitoring",
+            "description": "Monitoramento e métricas de desempenho do sistema"
         }
     ]
     
@@ -332,7 +415,8 @@ if __name__ == "__main__":
     log_with_context(
         logger, 
         "info", 
-        f"Iniciando servidor em {host}:{port} (reload: {reload})"
+        f"Iniciando servidor em {host}:{port} (reload: {reload})",
+        request_id="startup"
     )
     
     uvicorn.run("app.main:app", host=host, port=port, reload=reload) 

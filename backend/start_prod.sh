@@ -33,6 +33,9 @@ $ACCESS_LOG $ERROR_LOG $APP_LOG {
     delaycompress
     missingok
     notifempty
+    maxage 30
+    dateext
+    dateformat -%Y%m%d
     sharedscripts
     postrotate
         kill -USR1 \$(cat /tmp/gunicorn.pid 2>/dev/null) 2>/dev/null || true
@@ -42,32 +45,64 @@ EOF
     
     # Agendar logrotate para execução diária
     (crontab -l 2>/dev/null || echo "") | grep -v "ccontrol-logrotate" | { cat; echo "0 0 * * * /usr/sbin/logrotate /tmp/ccontrol-logrotate.conf --state /tmp/logrotate-state"; } | crontab -
+    
+    # Adicionar limpeza semanal para arquivos mais antigos que 30 dias
+    (crontab -l 2>/dev/null || echo "") | grep -v "ccontrol-logs-cleanup" | { cat; echo "0 1 * * 0 find $LOG_DIR -name \"*.gz\" -type f -mtime +30 -delete"; } | crontab -
 else
     echo "logrotate não encontrado, usando rotação manual de logs"
     
     # Função para rotação manual de logs
     rotate_log() {
         local log_file=$1
-        if [ -f "$log_file" ] && [ $(stat -c%s "$log_file" 2>/dev/null || stat -f%z "$log_file") -gt $((100*1024*1024)) ]; then
-            echo "Rotacionando $log_file"
-            timestamp=$(date +"%Y%m%d-%H%M%S")
-            mv "$log_file" "${log_file}.${timestamp}"
-            gzip "${log_file}.${timestamp}" &
+        local max_size=$2
+        local max_files=$3
+        
+        # Verificar se o arquivo de log existe
+        if [ ! -f "$log_file" ]; then
+            return
+        fi
+        
+        # Verificar tamanho do arquivo de log
+        local size=$(du -b "$log_file" | cut -f1)
+        local max_size_bytes=$(echo "$max_size" | sed 's/M/*1024*1024/' | bc)
+        
+        if [ "$size" -gt "$max_size_bytes" ]; then
+            echo "Rotacionando $log_file (tamanho: $size bytes)"
             
-            # Limpar logs antigos (manter apenas os 10 mais recentes)
-            ls -t "${log_file}".* | tail -n +$((MAX_LOG_FILES+1)) | xargs rm -f 2>/dev/null || true
+            # Mover arquivos antigos
+            for i in $(seq $max_files -1 1); do
+                if [ -f "${log_file}.$i" ]; then
+                    if [ "$i" -eq "$max_files" ]; then
+                        # Remover arquivo mais antigo
+                        rm -f "${log_file}.$i"
+                    else
+                        # Mover arquivo para próximo índice
+                        mv "${log_file}.$i" "${log_file}.$((i+1))"
+                    fi
+                fi
+            done
+            
+            # Mover arquivo atual
+            mv "$log_file" "${log_file}.1"
+            
+            # Criar novo arquivo vazio
+            touch "$log_file"
+            
+            # Comprimir arquivos antigos
+            gzip -f "${log_file}.1"
+            
+            # Reiniciar serviço para reconhecer nova rotação
+            if [ -f /tmp/gunicorn.pid ]; then
+                kill -USR1 $(cat /tmp/gunicorn.pid) 2>/dev/null || true
+            fi
         fi
     }
     
-    # Agendar verificação de tamanho dos logs a cada hora
-    (
-        while true; do
-            rotate_log "$ACCESS_LOG"
-            rotate_log "$ERROR_LOG"
-            rotate_log "$APP_LOG"
-            sleep 3600
-        done
-    ) &
+    # Agendar rotação manual e limpeza via cron
+    (crontab -l 2>/dev/null || echo "") | grep -v "ccontrol-manual-rotate" | { cat; echo "0 0 * * * for f in $ACCESS_LOG $ERROR_LOG $APP_LOG; do $0 rotate_log \$f $MAX_LOG_SIZE $MAX_LOG_FILES; done"; } | crontab -
+    
+    # Adicionar limpeza de arquivos antigos
+    (crontab -l 2>/dev/null || echo "") | grep -v "ccontrol-logs-cleanup" | { cat; echo "0 1 * * 0 find $LOG_DIR -name \"*.gz\" -type f -mtime +30 -delete"; } | crontab -
 fi
 
 # Função para lidar com sinais de término

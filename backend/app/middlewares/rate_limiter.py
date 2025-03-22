@@ -1,3 +1,23 @@
+"""Middleware para limitação de taxa de requisições (rate limiting).
+
+Este módulo oferece proteção contra abusos na API, limitando o número de requisições 
+por IP e/ou usuário em um determinado período de tempo.
+
+Configurações disponíveis (app/config/settings.py):
+- RATE_LIMIT_ENABLED: Ativa/desativa o rate limiting (boolean)
+- RATE_LIMIT_REQUESTS: Número máximo de requisições permitidas no período (int)
+- RATE_LIMIT_WINDOW: Janela de tempo em segundos (int)
+- RATE_LIMIT_BY_IP: Se deve limitar por IP (boolean)
+- RATE_LIMIT_BY_USER: Se deve limitar por usuário autenticado (boolean)
+- RATE_LIMIT_USER_MULTIPLIER: Multiplicador do limite para usuários autenticados (float)
+- RATE_LIMIT_ADMIN_EXEMPT: Se administradores estão isentos de rate limiting (boolean)
+- RATE_LIMIT_EXEMPT_PATHS: Lista de caminhos isentos de rate limiting (list)
+
+Para modificar os limites:
+1. Para toda a aplicação: altere as variáveis RATE_LIMIT_* no arquivo .env ou settings.py
+2. Para rotas específicas: utilize o parâmetro route_specific_limits na inicialização
+3. Para usuários específicos: ajuste o user_limit_multiplier (2.0 = dobro do limite padrão)
+"""
 from fastapi import Request, HTTPException, status
 from fastapi.responses import JSONResponse
 from datetime import datetime, timedelta
@@ -14,10 +34,24 @@ from app.utils.logging_config import get_logger
 # Configurar logger
 logger = get_logger(__name__)
 
-class RateLimiter:
+class RateLimitMiddleware:
     """
     Middleware avançado para limitar requisições por IP e/ou usuário.
     Utiliza Redis para armazenar os contadores de requisições.
+    
+    Configurações:
+    - requests_limit: Número máximo de requisições permitidas no período
+    - time_window: Janela de tempo em segundos
+    - by_ip: Se deve limitar por IP
+    - by_user: Se deve limitar por usuário autenticado
+    - user_limit_multiplier: Multiplicador do limite para usuários autenticados
+    - exempt_paths: Lista de caminhos isentos de rate limiting
+    - admin_exempt: Se administradores estão isentos de rate limiting
+    - route_specific_limits: Dicionário com limites específicos por rota
+    - burst_multiplier: Multiplicador para rajadas de tráfego
+    - burst_time_window: Janela de tempo para detecção de rajadas
+    - suspicious_ip_threshold: Número de requisições que marca um IP como suspeito
+    - suspicious_pattern_threshold: Número de requisições com padrão suspeito para alarme
     """
     
     def __init__(
@@ -250,7 +284,7 @@ class RateLimiter:
     
     async def _get_user_from_token(self, request: Request) -> Optional[Dict[str, Any]]:
         """
-        Extrai e valida o token de autenticação da requisição.
+        Tenta extrair informações do usuário a partir do token de autorização.
         """
         auth_header = request.headers.get("Authorization")
         if not auth_header or not auth_header.startswith("Bearer "):
@@ -264,86 +298,91 @@ class RateLimiter:
     
     async def _increment_counter(self, redis, key: str, expiry: int) -> int:
         """
-        Incrementa o contador no Redis e retorna o valor atual.
-        Também define a expiração se for a primeira requisição.
+        Incrementa um contador no Redis e define seu tempo de expiração.
+        Retorna o valor atual do contador.
         """
-        current = await redis.incr(key)
+        pipeline = redis.pipeline()
+        await pipeline.incr(key)
+        await pipeline.expire(key, expiry)
+        result = await pipeline.execute()
+        return result[0]  # O primeiro resultado é o valor do incremento
         
-        # Se for a primeira requisição, define a expiração
-        if current == 1:
-            await redis.expire(key, expiry)
-            
-        return current
-    
     async def _get_retry_after(self, redis, key: str) -> int:
         """
-        Calcula quanto tempo o cliente deve esperar antes de tentar novamente.
+        Retorna o tempo restante (em segundos) para expiração da chave no Redis.
         """
         ttl = await redis.ttl(key)
-        return max(1, ttl)  # Garante que seja pelo menos 1 segundo
-    
+        return max(1, ttl)  # No mínimo 1 segundo
+        
     def _get_route_specific_limits(self, path: str) -> Tuple[int, int]:
         """
-        Retorna limites específicos para uma rota, se existirem.
+        Retorna os limites específicos para uma rota, se existirem.
         Caso contrário, retorna os limites padrão.
         """
         for pattern, limit, window in self.route_patterns:
-            if pattern.match(path):
+            if pattern.search(path):
                 return limit, window
                 
         return self.requests_limit, self.time_window
-    
+        
     def _check_suspicious_patterns(self, request: Request) -> bool:
         """
         Verifica se a requisição contém padrões suspeitos que podem indicar ataques.
+        
+        Verifica:
+        1. Parâmetros de URL (query string)
+        2. Caminho da URL
+        3. Headers específicos que podem ser usados para ataques
+        
+        Retorna True se algum padrão suspeito for encontrado.
         """
-        # Verificar URL
-        url = str(request.url)
-        for pattern in self.suspicious_patterns:
-            if pattern.search(url):
-                logger.warning(f"Padrão suspeito detectado na URL: {url}")
+        # Verificar parâmetros de URL
+        for param, value in request.query_params.items():
+            if any(pattern.search(value) for pattern in self.suspicious_patterns):
+                logger.warning(f"Parâmetro suspeito detectado: {param}={value}")
                 return True
         
-        # Verificar parâmetros de consulta
-        for param, value in request.query_params.items():
-            for pattern in self.suspicious_patterns:
-                if pattern.search(value):
-                    logger.warning(f"Padrão suspeito detectado no parâmetro {param}: {value}")
-                    return True
-        
-        # Verificação superficial do User-Agent
-        user_agent = request.headers.get("User-Agent", "")
-        if not user_agent or len(user_agent) < 10 or "bot" in user_agent.lower():
+        # Verificar caminho da URL
+        path = request.url.path
+        if any(pattern.search(path) for pattern in self.suspicious_patterns):
+            logger.warning(f"Caminho suspeito detectado: {path}")
             return True
-        
+            
+        # Verificar headers específicos
+        headers_to_check = ["User-Agent", "Referer", "Cookie"]
+        for header in headers_to_check:
+            value = request.headers.get(header, "")
+            if any(pattern.search(value) for pattern in self.suspicious_patterns):
+                logger.warning(f"Header suspeito detectado: {header}={value}")
+                return True
+                
         return False
 
 
-# Funções para facilitar o uso do middleware
 def create_rate_limiter_middleware():
     """
-    Cria uma instância do middleware de rate limiting com as configurações do settings.
+    Cria e retorna uma instância configurada do middleware de limitação de taxa.
+    
+    Esta função usa as configurações definidas em settings.py para criar
+    uma instância do RateLimitMiddleware com os parâmetros apropriados.
+    
+    Exemplo de uso:
+        app.middleware("http")(create_rate_limiter_middleware())
+    
+    Para personalizar ainda mais os limites por rota:
+        route_specific_limits = {
+            r"/api/v1/usuarios/.*": (50, 60),  # 50 requisições por minuto para rotas de usuário
+            r"/api/v1/produtos/.*": (200, 60),  # 200 requisições por minuto para rotas de produtos
+        }
+        middleware = RateLimitMiddleware(route_specific_limits=route_specific_limits)
+        app.middleware("http")(middleware)
     """
-    # Definir limites específicos por rota
+    # Configurações específicas por rota (opcional)
     route_specific_limits = {
-        # Autenticação - mais restritivo para evitar brute force
-        r"^/api/v1/auth/.*": (30, 300),  # 30 req por 5 minutos
-        
-        # Operações sensíveis - mais restritivas
-        r"^/api/v1/usuarios.*": (60, 60),  # 60 req por minuto
-        r"^/api/v1/empresas.*": (60, 60),  # 60 req por minuto
-        
-        # Operações comuns - menos restritivas
-        r"^/api/v1/clientes.*": (120, 60),  # 120 req por minuto
-        r"^/api/v1/produtos.*": (120, 60),  # 120 req por minuto
-        r"^/api/v1/lancamentos.*": (150, 60),  # 150 req por minuto
-        
-        # Pesquisas e relatórios - limites intermediários
-        r"^/api/v1/.*/relatorios.*": (50, 60),  # 50 req por minuto
-        r"^/api/v1/.*/pesquisar.*": (80, 60),  # 80 req por minuto
+        # Exemplo: r"/api/v1/auth/.*": (20, 60),  # 20 requisições por minuto para rotas de autenticação
     }
     
-    return RateLimiter(
+    return RateLimitMiddleware(
         requests_limit=settings.RATE_LIMIT_REQUESTS,
         time_window=settings.RATE_LIMIT_WINDOW,
         by_ip=settings.RATE_LIMIT_BY_IP,
@@ -352,8 +391,4 @@ def create_rate_limiter_middleware():
         exempt_paths=settings.RATE_LIMIT_EXEMPT_PATHS,
         admin_exempt=settings.RATE_LIMIT_ADMIN_EXEMPT,
         route_specific_limits=route_specific_limits,
-        burst_multiplier=3.0,
-        burst_time_window=5,
-        suspicious_ip_threshold=200,
-        suspicious_pattern_threshold=50
     ) 

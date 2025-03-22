@@ -7,7 +7,7 @@ from datetime import datetime, date
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_session
+from app.database import get_async_session
 from app.models.lancamento import Lancamento
 from app.repositories.lancamento_repository import LancamentoRepository
 from app.repositories.cliente_repository import ClienteRepository
@@ -15,10 +15,11 @@ from app.repositories.fornecedor_repository import FornecedorRepository
 from app.repositories.conta_bancaria_repository import ContaBancariaRepository
 from app.repositories.forma_pagamento_repository import FormaPagamentoRepository
 from app.schemas.lancamento import (
-    LancamentoCreate, LancamentoUpdate, LancamentoResponse, 
+    LancamentoCreate, LancamentoUpdate, Lancamento as LancamentoSchema, 
     StatusLancamento, TipoLancamento
 )
-from app.schemas.common import PaginatedResponse
+from app.schemas.pagination import PaginatedResponse
+from app.services.log_sistema_service import LogSistemaService
 
 
 # Configurar logger
@@ -28,7 +29,7 @@ logger = logging.getLogger(__name__)
 class LancamentoService:
     """Serviço para gerenciamento de lançamentos financeiros."""
 
-    def __init__(self, session: AsyncSession = Depends(get_session)):
+    def __init__(self, session: AsyncSession):
         """Inicializar serviço com sessão."""
         self.session = session
         self.repository = LancamentoRepository(session)
@@ -37,7 +38,7 @@ class LancamentoService:
         self.conta_repository = ContaBancariaRepository(session)
         self.forma_pagamento_repository = FormaPagamentoRepository(session)
 
-    async def get_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> LancamentoResponse:
+    async def get_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> LancamentoSchema:
         """
         Obter lançamento por ID.
         
@@ -62,7 +63,7 @@ class LancamentoService:
                 detail="Lançamento não encontrado"
             )
             
-        return LancamentoResponse.model_validate(lancamento)
+        return LancamentoSchema.model_validate(lancamento)
 
     async def listar_lancamentos(
         self,
@@ -76,7 +77,7 @@ class LancamentoService:
         id_fornecedor: Optional[UUID] = None,
         id_conta: Optional[UUID] = None,
         status: Optional[str] = None
-    ) -> PaginatedResponse[LancamentoResponse]:
+    ) -> PaginatedResponse[LancamentoSchema]:
         """
         Listar lançamentos com filtros e paginação.
         
@@ -138,10 +139,10 @@ class LancamentoService:
             )
             
             # Converter para schema de resposta
-            items = [LancamentoResponse.model_validate(l) for l in lancamentos]
+            items = [LancamentoSchema.model_validate(l) for l in lancamentos]
             
             # Criar resposta paginada
-            return PaginatedResponse[LancamentoResponse](
+            return PaginatedResponse[LancamentoSchema](
                 items=items,
                 total=total,
                 page=skip // limit + 1 if limit > 0 else 1,
@@ -159,12 +160,14 @@ class LancamentoService:
                 detail=f"Erro ao listar lançamentos: {str(e)}"
             )
 
-    async def criar_lancamento(self, lancamento_data: LancamentoCreate) -> LancamentoResponse:
+    async def criar_lancamento(self, lancamento_data: LancamentoCreate, id_empresa: UUID, usuario_id: UUID) -> LancamentoSchema:
         """
         Criar novo lançamento.
         
         Args:
             lancamento_data: Dados do lançamento
+            id_empresa: ID da empresa
+            usuario_id: ID do usuário
             
         Returns:
             Lançamento criado
@@ -172,14 +175,14 @@ class LancamentoService:
         Raises:
             HTTPException: Se houver erro ao criar
         """
-        logger.info(f"Criando novo lançamento para empresa {lancamento_data.id_empresa}")
+        logger.info(f"Criando novo lançamento para empresa {id_empresa}")
         
         try:
             # Verificar se o cliente existe, se fornecido
             if lancamento_data.id_cliente:
                 cliente = await self.cliente_repository.get_by_id(
                     lancamento_data.id_cliente, 
-                    lancamento_data.id_empresa
+                    id_empresa
                 )
                 if not cliente:
                     raise HTTPException(
@@ -191,7 +194,7 @@ class LancamentoService:
             if lancamento_data.id_fornecedor:
                 fornecedor = await self.fornecedor_repository.get_by_id(
                     lancamento_data.id_fornecedor, 
-                    lancamento_data.id_empresa
+                    id_empresa
                 )
                 if not fornecedor:
                     raise HTTPException(
@@ -202,7 +205,7 @@ class LancamentoService:
             # Verificar se conta bancária existe e pertence à empresa
             conta = await self.conta_repository.get_by_id(
                 lancamento_data.id_conta, 
-                lancamento_data.id_empresa
+                id_empresa
             )
             if not conta:
                 raise HTTPException(
@@ -213,7 +216,7 @@ class LancamentoService:
             # Verificar se forma de pagamento existe e pertence à empresa
             forma = await self.forma_pagamento_repository.get_by_id(
                 lancamento_data.id_forma_pagamento, 
-                lancamento_data.id_empresa
+                id_empresa
             )
             if not forma:
                 raise HTTPException(
@@ -231,7 +234,7 @@ class LancamentoService:
             if lancamento.status == "efetivado":
                 await self._atualizar_saldo_conta(lancamento)
             
-            return LancamentoResponse.model_validate(lancamento)
+            return LancamentoSchema.model_validate(lancamento)
             
         except HTTPException:
             # Repassar exceções HTTP
@@ -248,7 +251,7 @@ class LancamentoService:
         id_lancamento: UUID, 
         lancamento_data: LancamentoUpdate, 
         id_empresa: UUID
-    ) -> LancamentoResponse:
+    ) -> LancamentoSchema:
         """
         Atualizar lançamento existente.
         
@@ -358,7 +361,7 @@ class LancamentoService:
                 if lancamento_atualizado.status == "efetivado" and conta_antiga_id != lancamento_atualizado.id_conta:
                     await self._estornar_saldo_conta(lancamento_atualizado, conta_antiga_id)
             
-            return LancamentoResponse.model_validate(lancamento_atualizado)
+            return LancamentoSchema.model_validate(lancamento_atualizado)
             
         except HTTPException:
             # Repassar exceções HTTP
@@ -422,7 +425,7 @@ class LancamentoService:
                 detail=f"Erro ao remover lançamento: {str(e)}"
             )
 
-    async def efetivar_lancamento(self, id_lancamento: UUID, id_empresa: UUID, data_efetivacao: Optional[date] = None) -> LancamentoResponse:
+    async def efetivar_lancamento(self, id_lancamento: UUID, id_empresa: UUID, data_efetivacao: Optional[date] = None) -> LancamentoSchema:
         """
         Efetivar um lançamento (alterar status de pendente para efetivado).
         
@@ -452,7 +455,7 @@ class LancamentoService:
             
             # Verificar se já está efetivado
             if lancamento.status == "efetivado":
-                return LancamentoResponse.model_validate(lancamento)
+                return LancamentoSchema.model_validate(lancamento)
             
             # Verificar se está cancelado
             if lancamento.status == "cancelado":
@@ -467,7 +470,7 @@ class LancamentoService:
             # Atualizar saldo da conta
             await self._atualizar_saldo_conta(lancamento_efetivado)
             
-            return LancamentoResponse.model_validate(lancamento_efetivado)
+            return LancamentoSchema.model_validate(lancamento_efetivado)
             
         except HTTPException:
             # Repassar exceções HTTP
@@ -479,7 +482,7 @@ class LancamentoService:
                 detail=f"Erro ao efetivar lançamento: {str(e)}"
             )
 
-    async def cancelar_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> LancamentoResponse:
+    async def cancelar_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> LancamentoSchema:
         """
         Cancelar um lançamento.
         
@@ -508,7 +511,7 @@ class LancamentoService:
             
             # Verificar se já está cancelado
             if lancamento.status == "cancelado":
-                return LancamentoResponse.model_validate(lancamento)
+                return LancamentoSchema.model_validate(lancamento)
             
             # Se estava efetivado, estornar o saldo da conta
             if lancamento.status == "efetivado":
@@ -517,7 +520,7 @@ class LancamentoService:
             # Cancelar o lançamento
             lancamento_cancelado = await self.repository.cancelar_lancamento(id_lancamento, id_empresa)
             
-            return LancamentoResponse.model_validate(lancamento_cancelado)
+            return LancamentoSchema.model_validate(lancamento_cancelado)
             
         except HTTPException:
             # Repassar exceções HTTP
