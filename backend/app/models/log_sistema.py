@@ -1,30 +1,31 @@
-"""Modelo de Log do Sistema para o sistema CCONTROL-M."""
+"""Modelo para logs do sistema."""
 import uuid
-from typing import Optional
-from sqlalchemy import String, Text, ForeignKey, JSON
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from datetime import datetime
+from typing import Optional, Dict, Any
+
+from sqlalchemy import Column, String, ForeignKey, DateTime, UUID, JSON
+from sqlalchemy.orm import relationship
 
 from app.database import Base
-from app.models.base_model import TimestampedModel
 
 
-class LogSistema(Base, TimestampedModel):
-    """
-    Modelo de log do sistema.
-    
-    Registra eventos e ações importantes no sistema CCONTROL-M.
-    """
-    
+class LogSistema(Base):
+    """Modelo para logs do sistema."""
     __tablename__ = "logs_sistema"
     
-    id_log: Mapped[uuid.UUID] = mapped_column(
-        primary_key=True, 
-        default=uuid.uuid4
-    )
-    acao: Mapped[str] = mapped_column(String, nullable=False)
-    descricao: Mapped[str] = mapped_column(Text, nullable=False)
-    dados: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    id_log = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id_usuario = Column(UUID(as_uuid=True), ForeignKey("usuarios.id_usuario"), nullable=True)
+    id_empresa = Column(UUID(as_uuid=True), ForeignKey("empresas.id_empresa"), nullable=True)
+    acao = Column(String, nullable=False)
+    descricao = Column(String, nullable=True, default='')
+    dados = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, onupdate=datetime.now, nullable=True)
     
+    # Relacionamentos
+    empresa = relationship("Empresa", back_populates="logs")
+    usuario = relationship("Usuario", back_populates="logs")
+
     def __repr__(self) -> str:
         """Representação em string do log."""
-        return f"<LogSistema(id={self.id_log}, acao='{self.acao}')>" 
+        return f"<LogSistema(id={self.id_log}, acao='{self.acao}', usuario_id={self.id_usuario})>" 

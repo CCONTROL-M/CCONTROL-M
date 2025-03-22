@@ -33,6 +33,7 @@ class Usuario(Base, TimestampedModel):
     
     # Relacionamentos
     empresa = relationship("Empresa", back_populates="usuarios")
+    logs = relationship("LogSistema", back_populates="usuario")
     
     def __repr__(self) -> str:
         """Representação em string do usuário."""

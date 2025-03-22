@@ -3,17 +3,20 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from contextlib import asynccontextmanager
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.openapi.utils import get_openapi
 
 # Importar rotas
-from app.routers import usuarios, empresas, clientes, categorias, centro_custos, logs_sistema, vendas, lancamentos, formas_pagamento, contas_bancarias, fornecedores, produtos
+from app.routers import usuarios, empresas, clientes, categorias, centro_custos, logs_sistema, vendas, parcelas, lancamentos, formas_pagamento, contas_bancarias, fornecedores, produtos
 
 # Importar configurações
 from app.config.settings import settings
 
 # Importar configuração de logs e middleware
 from app.utils.logging_config import get_logger, log_with_context
-from app.middleware.logging_middleware import RequestLoggingMiddleware
-from app.middleware.performance_middleware import PerformanceMiddleware
+from app.middlewares.logging_middleware import RequestLoggingMiddleware
+from app.middlewares.performance_middleware import PerformanceMiddleware
+from app.middlewares.tenant_middleware import TenantMiddleware
 
 # Importar monitor de agendamento
 from app.scripts.schedule_monitors import start_scheduler_thread
@@ -32,20 +35,26 @@ async def lifespan(app: FastAPI):
 
 # Criar aplicação FastAPI
 app = FastAPI(
-    title="CCONTROL-M API",
-    description="API do sistema CCONTROL-M para gerenciamento financeiro e controle empresarial",
+    title=settings.PROJECT_NAME,
+    description="API para o sistema CCONTROL-M: Controle Financeiro, Vendas e Gestão",
     version="1.0.0",
+    docs_url=None,
+    redoc_url=None,
+    openapi_url="/api/v1/openapi.json",
     lifespan=lifespan
 )
 
 # Configurar CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=settings.ALLOWED_HOSTS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Adicionar middleware de multi-tenancy
+app.add_middleware(TenantMiddleware)
 
 # Adicionar middleware de logging
 app.add_middleware(RequestLoggingMiddleware)
@@ -83,10 +92,10 @@ app.include_router(fornecedores.router, prefix="/api")
 app.include_router(produtos.router, prefix="/api")
 
 # Rota raiz
-@app.get("/", tags=["Root"])
+@app.get("/", include_in_schema=False)
 async def root():
-    log_with_context(logger, "info", "Acessando rota raiz")
-    return {"message": "CCONTROL-M API - Sistema de Gerenciamento Financeiro e Controle Empresarial"}
+    """Rota raiz da aplicação."""
+    return {"message": f"Bem-vindo à API do {settings.PROJECT_NAME}", "version": "1.0.0"}
 
 # Armazenar a referência do scheduler thread
 scheduler_thread = None
@@ -125,6 +134,150 @@ async def shutdown_event():
     """
     # O scheduler thread é daemon, então será encerrado automaticamente
     logger.info("Aplicação encerrada")
+
+@app.get("/api/v1/docs", include_in_schema=False)
+async def custom_swagger_ui_html():
+    """Rota para a documentação Swagger com estilo customizado."""
+    return get_swagger_ui_html(
+        openapi_url=app.openapi_url,
+        title=f"{settings.PROJECT_NAME} - Documentação API",
+        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.5.0/swagger-ui-bundle.js",
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.5.0/swagger-ui.css",
+        swagger_favicon_url="https://fastapi.tiangolo.com/img/favicon.png",
+    )
+
+def custom_openapi():
+    """Personalização da documentação OpenAPI."""
+    if app.openapi_schema:
+        return app.openapi_schema
+        
+    openapi_schema = get_openapi(
+        title=settings.PROJECT_NAME,
+        version="1.0.0",
+        description="""
+# Sistema CCONTROL-M: Controle Financeiro, Vendas e Gestão
+        
+O CCONTROL-M é um sistema completo para controle financeiro, gestão de vendas e administração
+empresarial, desenvolvido com arquitetura multi-tenant para suporte a múltiplas empresas.
+
+## Principais recursos
+
+* **Multi-tenancy**: Separação completa de dados por empresa
+* **Controle Financeiro**: Lançamentos, contas bancárias, categorias, centros de custo
+* **Gestão de Vendas**: Cadastro de clientes, produtos, vendas e parcelas
+* **Gestão de Fornecedores**: Cadastro, avaliação e transações
+* **Administração**: Controle de usuários, permissões e empresas
+* **Relatórios e Dashboards**: Visualização de dados e indicadores
+
+## Módulos principais
+
+### Gestão de Empresas e Usuários
+- Cadastro e gerenciamento de empresas
+- Controle de usuários e permissões
+- Logs de atividades
+
+### Financeiro
+- Lançamentos (receitas e despesas)
+- Contas bancárias
+- Categorias
+- Centros de custo
+- Formas de pagamento
+
+### Vendas
+- Clientes
+- Vendas
+- Parcelas
+- Recebimentos
+
+### Suprimentos
+- Fornecedores
+- Compras
+- Pagamentos
+        """,
+        routes=app.routes,
+    )
+    
+    # Adicionar tags com descrições detalhadas
+    openapi_schema["tags"] = [
+        {
+            "name": "auth",
+            "description": "Operações de autenticação e autorização"
+        },
+        {
+            "name": "empresa",
+            "description": "Gerenciamento de empresas e configurações multi-tenant"
+        },
+        {
+            "name": "usuario",
+            "description": "Gerenciamento de usuários, perfis e permissões"
+        },
+        {
+            "name": "cliente",
+            "description": "Cadastro e gestão de clientes"
+        },
+        {
+            "name": "fornecedor",
+            "description": "Cadastro e gestão de fornecedores"
+        },
+        {
+            "name": "centro_custo",
+            "description": "Controle de centros de custo para classificação de lançamentos"
+        },
+        {
+            "name": "categoria",
+            "description": "Categorias para classificação de lançamentos financeiros"
+        },
+        {
+            "name": "conta_bancaria",
+            "description": "Gerenciamento de contas bancárias, caixa e carteiras"
+        },
+        {
+            "name": "forma_pagamento",
+            "description": "Gerenciamento de formas de pagamento para vendas e compras"
+        },
+        {
+            "name": "lancamento",
+            "description": "Registro e controle de lançamentos financeiros (receitas e despesas)"
+        },
+        {
+            "name": "venda",
+            "description": "Registro e gestão de vendas"
+        },
+        {
+            "name": "parcela",
+            "description": "Controle de parcelas de vendas e pagamentos"
+        },
+        {
+            "name": "relatorio",
+            "description": "Relatórios e análises financeiras"
+        },
+        {
+            "name": "dashboard",
+            "description": "Painéis e indicadores de desempenho"
+        },
+        {
+            "name": "log",
+            "description": "Registro de atividades e auditoria do sistema"
+        }
+    ]
+    
+    # Adicionar componentes de segurança
+    openapi_schema["components"]["securitySchemes"] = {
+        "bearerAuth": {
+            "type": "http",
+            "scheme": "bearer",
+            "bearerFormat": "JWT",
+            "description": "Entre com seu token JWT"
+        }
+    }
+    
+    # Aplicar segurança global
+    openapi_schema["security"] = [{"bearerAuth": []}]
+
+    app.openapi_schema = openapi_schema
+    return app.openapi_schema
+
+app.openapi = custom_openapi
 
 if __name__ == "__main__":
     import uvicorn

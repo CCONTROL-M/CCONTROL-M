@@ -36,6 +36,10 @@ class Empresa(Base, TimestampedModel):
         back_populates="empresa", 
         cascade="all, delete-orphan"
     )
+    logs: Mapped[List["LogSistema"]] = relationship(
+        back_populates="empresa",
+        cascade="all, delete-orphan"
+    )
     clientes: Mapped[List["Cliente"]] = relationship(
         back_populates="empresa", 
         cascade="all, delete-orphan"

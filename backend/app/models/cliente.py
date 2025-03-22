@@ -1,39 +1,30 @@
-"""Modelo de Cliente para o sistema CCONTROL-M."""
+"""Modelo para clientes no sistema CCONTROL-M."""
 import uuid
+from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, ForeignKey
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from sqlalchemy import Column, String, Boolean, ForeignKey, DateTime, UUID
+from sqlalchemy.orm import relationship
 
 from app.database import Base
-from app.models.base_model import TimestampedModel
 
 
-class Cliente(Base, TimestampedModel):
-    """
-    Modelo de cliente.
-    
-    Representa um cliente no sistema CCONTROL-M.
-    """
-    
+class Cliente(Base):
+    """Modelo para clientes."""
     __tablename__ = "clientes"
     
-    id_cliente: Mapped[uuid.UUID] = mapped_column(
-        primary_key=True, 
-        default=uuid.uuid4
-    )
-    id_empresa: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("empresas.id_empresa", ondelete="CASCADE"),
-        nullable=False
-    )
-    nome: Mapped[str] = mapped_column(String, nullable=False)
-    documento: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    telefone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    id_cliente = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id_empresa = Column(UUID(as_uuid=True), ForeignKey("empresas.id_empresa", ondelete="CASCADE"), nullable=False)
+    nome = Column(String, nullable=False)
+    documento = Column(String, nullable=True)  # CPF ou CNPJ
+    telefone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    ativo = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, onupdate=datetime.now, nullable=True)
     
     # Relacionamentos
     empresa = relationship("Empresa", back_populates="clientes")
-    lancamentos = relationship("Lancamento", back_populates="cliente")
-    vendas = relationship("Venda", back_populates="cliente")
     
     def __repr__(self) -> str:
         """Representação em string do cliente."""

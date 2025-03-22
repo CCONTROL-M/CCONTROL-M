@@ -1,222 +1,226 @@
-"""Módulo com classe base para repositories."""
-from typing import Any, Dict, Generic, List, Optional, Type, TypeVar, Union
-from uuid import UUID
+"""Base repository para acesso ao banco de dados com suporte a multi-tenancy."""
 import logging
+from typing import Any, Dict, List, Optional, Type, TypeVar, Generic, Union, UUID
 from fastapi import HTTPException, status
-from sqlalchemy import and_, select, func, desc, asc, delete, update, Column
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import Session
+from sqlalchemy import select, insert, update, delete, text
+from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel
 
-# Define o tipo genérico para o modelo ORM
-ModelType = TypeVar("ModelType")
-# Define o tipo genérico para o schema de criação
-CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
-# Define o tipo genérico para o schema de atualização
-UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
+from app.db.database import get_db_session
 
+ModelType = TypeVar("ModelType")
+CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
+UpdateSchemaType = TypeVar("UpdateSchemaType", bound=BaseModel)
 
 class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
     """
-    Classe base para repositórios.
+    Repositório base para operações de banco de dados com suporte a multi-tenancy.
     
-    Fornece métodos de CRUD genéricos que podem ser reutilizados em todos os repositórios.
+    Esta classe implementa os métodos básicos de CRUD e é adaptada para
+    trabalhar com o Row-Level Security (RLS) do PostgreSQL/Supabase.
     """
     
     def __init__(self, model: Type[ModelType]):
         """
-        Inicializa o repositório com o modelo específico.
+        Inicializa o repositório com o modelo ORM.
         
         Args:
-            model: Classe do modelo SQLAlchemy
+            model: Classe do modelo ORM (SQLAlchemy)
         """
         self.model = model
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
     
-    def get(self, db: Session, id: UUID) -> Optional[ModelType]:
+    async def _set_tenant_context(self, session: AsyncSession, tenant_id: Optional[UUID] = None) -> None:
         """
-        Obtém um registro pelo ID.
+        Define a variável de sessão para o tenant atual no PostgreSQL.
+        Esta função é essencial para o funcionamento do RLS.
         
         Args:
-            db: Sessão do banco de dados
+            session: Sessão assíncrona do SQLAlchemy
+            tenant_id: ID do tenant (empresa)
+        """
+        if tenant_id is not None:
+            # Define a variável de sessão para o tenant no PostgreSQL
+            # Usamos app.current_tenant para compatibilidade com Supabase
+            query = text("SET app.current_tenant = :tenant_id")
+            await session.execute(query, {"tenant_id": tenant_id})
+    
+    async def get_all(self, tenant_id: Optional[UUID] = None) -> List[ModelType]:
+        """
+        Recupera todos os registros do modelo.
+        
+        Args:
+            tenant_id: ID do tenant (empresa) para filtrar os resultados
+            
+        Returns:
+            Lista de instâncias do modelo
+        """
+        async with get_db_session() as session:
+            await self._set_tenant_context(session, tenant_id)
+            query = select(self.model)
+            result = await session.execute(query)
+            return list(result.scalars().all())
+    
+    async def get_by_id(self, id: Any, tenant_id: Optional[UUID] = None) -> Optional[ModelType]:
+        """
+        Recupera um registro pelo ID.
+        
+        Args:
             id: ID do registro
+            tenant_id: ID do tenant (empresa) para filtrar os resultados
             
         Returns:
-            Registro encontrado ou None
+            Instância do modelo ou None se não encontrado
         """
-        return db.query(self.model).filter(self.model.id == id).first()
+        async with get_db_session() as session:
+            await self._set_tenant_context(session, tenant_id)
+            query = select(self.model).where(self.model.id == id)
+            result = await session.execute(query)
+            return result.scalar_one_or_none()
     
-    def get_by_field(self, db: Session, field_name: str, value: Any) -> Optional[ModelType]:
-        """
-        Obtém um registro pelo valor de um campo específico.
-        
-        Args:
-            db: Sessão do banco de dados
-            field_name: Nome do campo
-            value: Valor do campo
-            
-        Returns:
-            Registro encontrado ou None
-        """
-        return db.query(self.model).filter(getattr(self.model, field_name) == value).first()
-    
-    def get_multi(
-        self,
-        db: Session,
-        *,
-        skip: int = 0,
-        limit: int = 100,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> List[ModelType]:
-        """
-        Obtém múltiplos registros, com paginação e filtragem opcional.
-        
-        Args:
-            db: Sessão do banco de dados
-            skip: Número de registros para pular (deslocamento)
-            limit: Número máximo de registros para retornar
-            filters: Dicionário de filtros {nome_campo: valor}
-            
-        Returns:
-            Lista de registros
-        """
-        query = db.query(self.model)
-        
-        if filters:
-            filter_conditions = []
-            for field_name, value in filters.items():
-                if hasattr(self.model, field_name):
-                    filter_conditions.append(getattr(self.model, field_name) == value)
-            
-            if filter_conditions:
-                query = query.filter(and_(*filter_conditions))
-        
-        return query.offset(skip).limit(limit).all()
-    
-    def get_count(
-        self,
-        db: Session,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> int:
-        """
-        Obtém a contagem total de registros, com filtragem opcional.
-        
-        Args:
-            db: Sessão do banco de dados
-            filters: Dicionário de filtros {nome_campo: valor}
-            
-        Returns:
-            Contagem total de registros
-        """
-        query = db.query(func.count(self.model.id))
-        
-        if filters:
-            filter_conditions = []
-            for field_name, value in filters.items():
-                if hasattr(self.model, field_name):
-                    filter_conditions.append(getattr(self.model, field_name) == value)
-            
-            if filter_conditions:
-                query = query.filter(and_(*filter_conditions))
-        
-        return query.scalar()
-    
-    def create(self, db: Session, *, obj_in: Union[CreateSchemaType, Dict[str, Any]]) -> ModelType:
+    async def create(self, obj_in: Union[CreateSchemaType, Dict[str, Any]], 
+                    tenant_id: Optional[UUID] = None) -> ModelType:
         """
         Cria um novo registro.
         
         Args:
-            db: Sessão do banco de dados
-            obj_in: Dados para criação (schema ou dicionário)
+            obj_in: Dados para criar o registro (schema ou dicionário)
+            tenant_id: ID do tenant (empresa) para associar ao registro
             
         Returns:
-            Registro criado
+            Instância do modelo criado
         """
         try:
-            obj_data = obj_in.model_dump() if isinstance(obj_in, BaseModel) else obj_in
-            db_obj = self.model(**obj_data)
-            db.add(db_obj)
-            db.commit()
-            db.refresh(db_obj)
-            return db_obj
+            async with get_db_session() as session:
+                await self._set_tenant_context(session, tenant_id)
+                
+                # Converter schema para dicionário se necessário
+                if isinstance(obj_in, BaseModel):
+                    data = obj_in.model_dump()
+                else:
+                    data = obj_in
+                
+                # Se o modelo tem campo id_empresa e o tenant_id foi fornecido, adiciona ao registro
+                if hasattr(self.model, 'id_empresa') and tenant_id is not None:
+                    data['id_empresa'] = tenant_id
+                
+                stmt = insert(self.model).values(**data).returning(self.model)
+                result = await session.execute(stmt)
+                await session.commit()
+                return result.scalar_one()
         except SQLAlchemyError as e:
-            db.rollback()
             self.logger.error(f"Erro ao criar registro: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Erro ao criar registro: {str(e)}"
             )
     
-    def update(
-        self,
-        db: Session,
-        *,
-        db_obj: ModelType,
-        obj_in: Union[UpdateSchemaType, Dict[str, Any]]
-    ) -> ModelType:
+    async def update(self, id: Any, obj_in: Union[UpdateSchemaType, Dict[str, Any]], 
+                    tenant_id: Optional[UUID] = None) -> Optional[ModelType]:
         """
         Atualiza um registro existente.
         
         Args:
-            db: Sessão do banco de dados
-            db_obj: Instância existente do objeto
-            obj_in: Dados para atualização (schema ou dicionário)
+            id: ID do registro
+            obj_in: Dados para atualizar (schema ou dicionário)
+            tenant_id: ID do tenant (empresa) para filtrar os resultados
             
         Returns:
-            Registro atualizado
+            Instância do modelo atualizado ou None se não encontrado
         """
         try:
-            if isinstance(obj_in, dict):
-                update_data = obj_in
-            else:
-                update_data = obj_in.model_dump(exclude_unset=True)
-            
-            for field, value in update_data.items():
-                if hasattr(db_obj, field):
-                    setattr(db_obj, field, value)
-            
-            db.add(db_obj)
-            db.commit()
-            db.refresh(db_obj)
-            return db_obj
+            async with get_db_session() as session:
+                await self._set_tenant_context(session, tenant_id)
+                
+                # Converter schema para dicionário se necessário
+                if isinstance(obj_in, BaseModel):
+                    data = obj_in.model_dump(exclude_unset=True)
+                else:
+                    data = obj_in
+                
+                # Remover id_empresa do payload de dados caso ele exista
+                # para evitar que um registro seja transferido para outra empresa
+                if 'id_empresa' in data:
+                    data.pop('id_empresa')
+                    
+                stmt = (
+                    update(self.model)
+                    .where(self.model.id == id)
+                    .values(**data)
+                    .returning(self.model)
+                )
+                result = await session.execute(stmt)
+                updated = result.scalar_one_or_none()
+                
+                if updated is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Registro não encontrado"
+                    )
+                
+                await session.commit()
+                return updated
+        except HTTPException:
+            raise
         except SQLAlchemyError as e:
-            db.rollback()
             self.logger.error(f"Erro ao atualizar registro: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Erro ao atualizar registro: {str(e)}"
             )
     
-    def delete(self, db: Session, *, id: UUID) -> ModelType:
+    async def delete(self, id: Any, tenant_id: Optional[UUID] = None) -> bool:
         """
-        Remove um registro pelo ID.
+        Remove um registro.
         
         Args:
-            db: Sessão do banco de dados
             id: ID do registro
+            tenant_id: ID do tenant (empresa) para filtrar os resultados
             
         Returns:
-            Registro removido
-            
-        Raises:
-            HTTPException: Se o registro não for encontrado
+            True se o registro foi removido, False caso contrário
         """
         try:
-            obj = db.query(self.model).get(id)
-            if obj is None:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Registro não encontrado"
+            async with get_db_session() as session:
+                await self._set_tenant_context(session, tenant_id)
+                stmt = (
+                    delete(self.model)
+                    .where(self.model.id == id)
+                    .returning(self.model.id)
                 )
-            
-            db.delete(obj)
-            db.commit()
-            return obj
+                result = await session.execute(stmt)
+                deleted = result.scalar_one_or_none()
+                
+                if deleted is None:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Registro não encontrado"
+                    )
+                
+                await session.commit()
+                return True
+        except HTTPException:
+            raise
         except SQLAlchemyError as e:
-            db.rollback()
             self.logger.error(f"Erro ao excluir registro: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail=f"Erro ao excluir registro: {str(e)}"
-            ) 
+            )
+    
+    async def count(self, tenant_id: Optional[UUID] = None) -> int:
+        """
+        Conta o número de registros.
+        
+        Args:
+            tenant_id: ID do tenant (empresa) para filtrar os resultados
+            
+        Returns:
+            Número de registros
+        """
+        async with get_db_session() as session:
+            await self._set_tenant_context(session, tenant_id)
+            query = select(self.model)
+            result = await session.execute(query)
+            return len(list(result.scalars().all())) 

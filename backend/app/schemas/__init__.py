@@ -22,8 +22,7 @@ from .lancamento import (
     LancamentoUpdate, 
     LancamentoInDB, 
     Lancamento, 
-    LancamentoList,
-    LancamentoDashboard
+    LancamentoList
 )
 from .categoria import (
     CategoriaBase, 
@@ -94,8 +93,14 @@ from .produto import (
     ProdutoCreate, 
     ProdutoUpdate, 
     ProdutoInDB, 
-    Produto, 
-    ProdutoList
+    Produto
+)
+from .log_sistema import (
+    LogSistemaBase, 
+    LogSistemaCreate, 
+    LogSistemaInDB, 
+    LogSistema, 
+    LogSistemaList
 )
 from .token import Token, TokenPayload
 from .pagination import PaginatedResponse
@@ -103,32 +108,31 @@ from .pagination import PaginatedResponse
 # Lista completa de modelos que devem ser exportados
 __all__ = [
     # Usuários e empresas
-    'Usuario', 'UsuarioCreate', 'UsuarioUpdate', 'UsuarioLogin', 'UsuarioPaginacao',
-    'Empresa', 'EmpresaCreate', 'EmpresaUpdate',
-    'Token', 'TokenData',
+    'Usuario', 'UsuarioCreate', 'UsuarioUpdate', 'UsuarioList',
+    'Empresa', 'EmpresaCreate', 'EmpresaUpdate', 'EmpresaList',
+    'Token', 'TokenPayload',
     
     # Clientes e fornecedores
-    'Cliente', 'ClienteCreate', 'ClienteUpdate', 'ClientePaginacao',
-    'Fornecedor', 'FornecedorCreate', 'FornecedorUpdate', 'FornecedorPaginacao',
+    'Cliente', 'ClienteCreate', 'ClienteUpdate', 'ClienteList',
+    'Fornecedor', 'FornecedorCreate', 'FornecedorUpdate', 'FornecedorList',
     
     # Financeiro
-    'ContaBancaria', 'ContaBancariaCreate', 'ContaBancariaUpdate', 'ContaBancariaPaginacao',
-    'FormaPagamento', 'FormaPagamentoCreate', 'FormaPagamentoUpdate', 'FormaPagamentoPaginacao',
-    'Categoria', 'CategoriaCreate', 'CategoriaUpdate', 'CategoriaPaginacao',
-    'CentroCusto', 'CentroCustoCreate', 'CentroCustoUpdate', 'CentroCustoPaginacao',
-    'Lancamento', 'LancamentoCreate', 'LancamentoUpdate', 'LancamentoPaginacao',
-    'ResumoFinanceiro', 'FluxoCaixa', 'RelatorioFinanceiro',
+    'ContaBancaria', 'ContaBancariaCreate', 'ContaBancariaUpdate', 'ContaBancariaList',
+    'FormaPagamento', 'FormaPagamentoCreate', 'FormaPagamentoUpdate', 'FormaPagamentoList',
+    'Categoria', 'CategoriaCreate', 'CategoriaUpdate', 'CategoriaList',
+    'CentroCusto', 'CentroCustoCreate', 'CentroCustoUpdate', 'CentroCustoList',
+    'Lancamento', 'LancamentoCreate', 'LancamentoUpdate', 'LancamentoList',
     
     # Vendas
-    'Venda', 'VendaCreate', 'VendaUpdate', 'VendaPaginacao',
-    'Parcela', 'ParcelaCreate', 'ParcelaUpdate', 'RelatorioVendas',
+    'Venda', 'VendaCreate', 'VendaUpdate', 'VendaList',
+    'Parcela', 'ParcelaCreate', 'ParcelaUpdate', 'ParcelaList',
     
     # Produtos
-    'Produto', 'ProdutoCreate', 'ProdutoUpdate', 'ProdutosPaginados', 'EstoqueUpdate',
+    'Produto', 'ProdutoCreate', 'ProdutoUpdate',
     
     # Sistema
-    'LogSistema', 'LogSistemaCreate', 'LogSistemaPaginacao',
-    'SystemHealthCheck', 'DatabaseMetrics'
+    'LogSistema', 'LogSistemaCreate', 'LogSistemaList',
+    'PaginatedResponse'
 ]
 
 # Adicionar novos schemas aqui conforme necessário 

@@ -1,39 +1,32 @@
-"""Modelo de Fornecedor para o sistema CCONTROL-M."""
+"""Modelo para fornecedores no sistema CCONTROL-M."""
 import uuid
+from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, ForeignKey, Text
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from sqlalchemy import Column, String, Boolean, Integer, ForeignKey, DateTime, UUID
+from sqlalchemy.orm import relationship
 
 from app.database import Base
-from app.models.base_model import TimestampedModel
 
 
-class Fornecedor(Base, TimestampedModel):
-    """
-    Modelo de fornecedor.
-    
-    Representa um fornecedor no sistema CCONTROL-M.
-    """
-    
+class Fornecedor(Base):
+    """Modelo para fornecedores."""
     __tablename__ = "fornecedores"
     
-    id_fornecedor: Mapped[uuid.UUID] = mapped_column(
-        primary_key=True, 
-        default=uuid.uuid4
-    )
-    id_empresa: Mapped[uuid.UUID] = mapped_column(
-        ForeignKey("empresas.id_empresa", ondelete="CASCADE"),
-        nullable=False
-    )
-    nome: Mapped[str] = mapped_column(String, nullable=False)
-    documento: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    telefone: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    email: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    observacoes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    id_fornecedor = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id_empresa = Column(UUID(as_uuid=True), ForeignKey("empresas.id_empresa", ondelete="CASCADE"), nullable=False)
+    nome = Column(String, nullable=False)
+    documento = Column(String, nullable=True)  # CNPJ
+    telefone = Column(String, nullable=True)
+    email = Column(String, nullable=True)
+    observacoes = Column(String, nullable=True)
+    avaliacao = Column(Integer, nullable=True)
+    ativo = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+    updated_at = Column(DateTime, onupdate=datetime.now, nullable=True)
     
     # Relacionamentos
     empresa = relationship("Empresa", back_populates="fornecedores")
-    lancamentos = relationship("Lancamento", back_populates="fornecedor")
     
     def __repr__(self) -> str:
         """Representação em string do fornecedor."""
