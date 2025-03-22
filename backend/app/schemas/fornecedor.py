@@ -1,58 +1,82 @@
-"""Schema para validação e serialização de fornecedores no sistema CCONTROL-M."""
+"""Schemas para a entidade Fornecedor."""
+from typing import List, Optional
 from uuid import UUID
-from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, EmailStr, validator, field_validator
 from datetime import datetime
-from .pagination import PaginatedResponse
+from .validators import validar_cnpj
 
 
 class FornecedorBase(BaseModel):
-    """Schema base para fornecedores."""
-    nome: str
-    cnpj: str
-    contato: Optional[str] = None
+    """Modelo base para fornecedores."""
+    nome: str = Field(..., min_length=3, max_length=150)
+    cnpj: str = Field(..., min_length=14, max_length=18)
+    email: Optional[EmailStr] = None
     telefone: Optional[str] = None
-    email: Optional[str] = None
-    observacoes: Optional[str] = None
-    avaliacao: Optional[int] = None
+    endereco: Optional[str] = None
+    observacao: Optional[str] = None
+    avaliacao: Optional[int] = Field(None, ge=1, le=5)
+    ativo: bool = True
+
+    @field_validator('cnpj')
+    def validar_formato_cnpj(cls, v):
+        """Valida e formata o CNPJ."""
+        return validar_cnpj(v)
 
 
 class FornecedorCreate(FornecedorBase):
-    """Schema para criação de fornecedores."""
-    id_empresa: UUID
+    """Modelo para criação de fornecedores."""
+    pass
 
 
 class FornecedorUpdate(BaseModel):
-    """Schema para atualização parcial de fornecedores."""
+    """Modelo para atualização de fornecedores."""
     nome: Optional[str] = None
     cnpj: Optional[str] = None
-    contato: Optional[str] = None
+    email: Optional[EmailStr] = None
     telefone: Optional[str] = None
-    email: Optional[str] = None
-    observacoes: Optional[str] = None
+    endereco: Optional[str] = None
+    observacao: Optional[str] = None
     avaliacao: Optional[int] = None
     ativo: Optional[bool] = None
 
+    @field_validator('cnpj')
+    def validar_formato_cnpj(cls, v):
+        """Valida e formata o CNPJ."""
+        if v is None:
+            return v
+        return validar_cnpj(v)
 
-class FornecedorInDB(FornecedorBase):
-    """Schema para representação de fornecedores no banco de dados."""
+
+class FornecedorResponse(FornecedorBase):
+    """Modelo para resposta de fornecedores."""
     id_fornecedor: UUID
     id_empresa: UUID
-    ativo: bool = True
-    created_at: datetime
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
 
 
-class Fornecedor(FornecedorInDB):
-    """Schema para representação de fornecedores nas respostas da API."""
-    
-    class Config:
-        from_attributes = True
+class FornecedorInDB(FornecedorResponse):
+    """
+    Schema para representação interna do fornecedor no banco de dados.
+    Mantido por motivos de compatibilidade com código existente.
+    """
+    pass
 
 
-class FornecedorList(PaginatedResponse):
-    """Schema para listagem paginada de fornecedores."""
-    items: List[Fornecedor] 
+class Fornecedor(FornecedorResponse):
+    """
+    Alias para FornecedorResponse.
+    Mantido por motivos de compatibilidade com código existente.
+    """
+    pass
+
+
+class FornecedorList(BaseModel):
+    """Modelo para listagem paginada de fornecedores."""
+    items: List[FornecedorResponse]
+    total: int
+    page: int
+    size: int 

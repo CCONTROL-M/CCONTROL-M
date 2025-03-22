@@ -1,15 +1,15 @@
 """Dependências para injeção nas rotas do FastAPI."""
 from datetime import datetime, timedelta
-from typing import Optional, Union, Any
+from typing import Optional, Union, Any, Dict, Callable
+from functools import wraps
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from pydantic import ValidationError
-from sqlalchemy.orm import Session
 
 from app.config.settings import settings
-from app.database import get_db
+from app.database import db_async_session
 from app.schemas.token import TokenPayload
 from app.repositories.usuario_repository import UsuarioRepository
 
@@ -21,15 +21,13 @@ oauth2_scheme = OAuth2PasswordBearer(
 
 
 async def get_current_user(
-    token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
+    token: str = Depends(oauth2_scheme)
 ) -> TokenPayload:
     """
     Valida o token JWT e retorna os dados do usuário atual.
     
     Args:
         token: Token JWT de autenticação
-        db: Sessão do banco de dados
         
     Returns:
         TokenPayload: Dados do payload do token
@@ -61,13 +59,14 @@ async def get_current_user(
         )
     
     # Verificar se o usuário existe no banco de dados
-    usuario_repo = UsuarioRepository()
-    user = usuario_repo.get_by_field(db, "id_usuario", token_data.sub)
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Usuário não encontrado",
-        )
+    async with db_async_session() as session:
+        usuario_repo = UsuarioRepository(session)
+        user = await usuario_repo.get_by_id(token_data.sub)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Usuário não encontrado",
+            )
     
     return token_data
 
@@ -113,4 +112,56 @@ def create_access_token(
         algorithm=settings.ALGORITHM
     )
     
-    return encoded_jwt 
+    return encoded_jwt
+
+
+def check_permission(permission: str):
+    """
+    Verifica se o usuário tem permissão para acessar um recurso específico.
+    
+    Args:
+        permission: Nome da permissão necessária
+    
+    Returns:
+        Callable: Função de dependência que verifica a permissão
+    
+    Usage:
+        @router.get("/items/", dependencies=[Depends(check_permission("read:items"))])
+    """
+    async def dependency(current_user: TokenPayload = Depends(get_current_user)) -> bool:
+        # Verificar se o usuário está autenticado
+        if not current_user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Usuário não autenticado",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Se o usuário for administrador, tem todas as permissões
+        if current_user.tipo_usuario == "ADMIN":
+            return True
+            
+        # Verificar permissões do usuário no novo sistema de permissões
+        if ":" in permission:
+            from app.repositories.permissao_usuario_repository import PermissaoUsuarioRepository
+            
+            recurso, acao = permission.split(":", 1)
+            
+            # Verificar permissão específica no repositório
+            permissao_repo = PermissaoUsuarioRepository()
+            has_permission = await permissao_repo.check_user_permission(
+                user_id=current_user.sub,
+                recurso=recurso,
+                acao=acao,
+                tenant_id=current_user.empresa_id
+            )
+            
+            if not has_permission:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=f"Sem permissão para '{acao}' no recurso '{recurso}'"
+                )
+        
+        return True
+        
+    return dependency 

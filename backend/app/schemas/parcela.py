@@ -1,7 +1,7 @@
 """Schemas Pydantic para Parcelas no sistema CCONTROL-M."""
 from datetime import date, datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -108,6 +108,41 @@ class ParcelaList(BaseModel):
     data_vencimento: date
     data_pagamento: Optional[date] = None
     status: StatusParcela
+    
+    class Config:
+        from_attributes = True
+
+
+class ParcelaPagamento(BaseModel):
+    """Schema para registrar o pagamento de uma parcela."""
+    data_pagamento: date = Field(..., description="Data de pagamento da parcela")
+    valor_pago: float = Field(..., description="Valor efetivamente pago", gt=0)
+    id_conta_bancaria: UUID = Field(..., description="ID da conta bancária utilizada para o pagamento")
+    observacao: Optional[str] = Field(None, description="Observações sobre o pagamento", max_length=1000)
+    
+    @field_validator('valor_pago')
+    def validar_valor_pago(cls, v: float) -> float:
+        """Valida que o valor pago seja positivo."""
+        if v <= 0:
+            raise ValueError("Valor pago deve ser maior que zero")
+        return v
+
+
+class ParcelaResumo(BaseModel):
+    """Schema para resumo de parcelas usado no dashboard."""
+    quantidade: int = Field(0, description="Quantidade de parcelas")
+    valor_total: float = Field(0.0, description="Valor total das parcelas")
+    
+    class Config:
+        from_attributes = True
+
+
+class ParcelaDashboard(BaseModel):
+    """Schema para dashboard de parcelas."""
+    vencidas: ParcelaResumo = Field(..., description="Resumo de parcelas vencidas")
+    proximas: ParcelaResumo = Field(..., description="Resumo de parcelas próximas do vencimento")
+    pagas_mes_atual: ParcelaResumo = Field(..., description="Resumo de parcelas pagas no mês atual")
+    pendentes_total: ParcelaResumo = Field(..., description="Resumo de todas as parcelas pendentes")
     
     class Config:
         from_attributes = True 

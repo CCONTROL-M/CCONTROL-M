@@ -1,48 +1,49 @@
-"""Serviço para gerenciamento de lançamentos financeiros no sistema CCONTROL-M."""
-from uuid import UUID
-from datetime import datetime, date
-from typing import Dict, Any, List, Optional, Tuple
-from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import Depends, HTTPException, status
+"""Serviço para gerenciamento de lançamentos financeiros."""
 import logging
+from uuid import UUID
+from typing import List, Optional, Dict, Any, Tuple
+from datetime import datetime, date
 
-from app.schemas.lancamento import LancamentoCreate, LancamentoUpdate, Lancamento, TipoLancamento, StatusLancamento
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import get_session
+from app.models.lancamento import Lancamento
 from app.repositories.lancamento_repository import LancamentoRepository
-from app.repositories.categoria_repository import CategoriaRepository
-from app.repositories.centro_custo_repository import CentroCustoRepository
 from app.repositories.cliente_repository import ClienteRepository
 from app.repositories.fornecedor_repository import FornecedorRepository
 from app.repositories.conta_bancaria_repository import ContaBancariaRepository
-from app.repositories.parcela_repository import ParcelaRepository
-from app.services.log_sistema_service import LogSistemaService
-from app.schemas.log_sistema import LogSistemaCreate
-from app.database import get_async_session
+from app.repositories.forma_pagamento_repository import FormaPagamentoRepository
+from app.schemas.lancamento import (
+    LancamentoCreate, LancamentoUpdate, LancamentoResponse, 
+    StatusLancamento, TipoLancamento
+)
+from app.schemas.common import PaginatedResponse
+
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 
 class LancamentoService:
     """Serviço para gerenciamento de lançamentos financeiros."""
-    
-    def __init__(self, 
-                 session: AsyncSession = Depends(get_async_session),
-                 log_service: LogSistemaService = Depends()):
-        """Inicializar serviço com repositórios."""
+
+    def __init__(self, session: AsyncSession = Depends(get_session)):
+        """Inicializar serviço com sessão."""
+        self.session = session
         self.repository = LancamentoRepository(session)
-        self.categoria_repository = CategoriaRepository(session)
-        self.centro_custo_repository = CentroCustoRepository(session)
         self.cliente_repository = ClienteRepository(session)
         self.fornecedor_repository = FornecedorRepository(session)
-        self.conta_bancaria_repository = ContaBancariaRepository(session)
-        self.parcela_repository = ParcelaRepository(session)
-        self.log_service = log_service
-        self.logger = logging.getLogger(__name__)
-        
-    async def get_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> Lancamento:
+        self.conta_repository = ContaBancariaRepository(session)
+        self.forma_pagamento_repository = FormaPagamentoRepository(session)
+
+    async def get_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> LancamentoResponse:
         """
-        Obter lançamento pelo ID.
+        Obter lançamento por ID.
         
         Args:
             id_lancamento: ID do lançamento
-            id_empresa: ID da empresa para validação de acesso
+            id_empresa: ID da empresa
             
         Returns:
             Lançamento encontrado
@@ -50,575 +51,652 @@ class LancamentoService:
         Raises:
             HTTPException: Se o lançamento não for encontrado
         """
-        self.logger.info(f"Buscando lançamento ID: {id_lancamento}")
+        logger.info(f"Buscando lançamento com ID {id_lancamento}")
         
         lancamento = await self.repository.get_by_id(id_lancamento, id_empresa)
+        
         if not lancamento:
-            self.logger.warning(f"Lançamento não encontrado: {id_lancamento}")
+            logger.warning(f"Lançamento com ID {id_lancamento} não encontrado")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Lançamento não encontrado"
             )
-        return lancamento
-        
+            
+        return LancamentoResponse.model_validate(lancamento)
+
     async def listar_lancamentos(
         self,
         id_empresa: UUID,
         skip: int = 0,
         limit: int = 100,
-        tipo: Optional[TipoLancamento] = None,
-        status: Optional[StatusLancamento] = None,
+        tipo: Optional[str] = None,
         data_inicio: Optional[date] = None,
         data_fim: Optional[date] = None,
-        id_categoria: Optional[UUID] = None,
-        id_centro_custo: Optional[UUID] = None,
         id_cliente: Optional[UUID] = None,
         id_fornecedor: Optional[UUID] = None,
-        id_conta_bancaria: Optional[UUID] = None,
-        id_parcela: Optional[UUID] = None,
-        descricao: Optional[str] = None,
-        valor_min: Optional[float] = None,
-        valor_max: Optional[float] = None
-    ) -> Tuple[List[Lancamento], int]:
+        id_conta: Optional[UUID] = None,
+        status: Optional[str] = None
+    ) -> PaginatedResponse[LancamentoResponse]:
         """
-        Listar lançamentos com paginação e filtros.
+        Listar lançamentos com filtros e paginação.
         
         Args:
             id_empresa: ID da empresa
-            skip: Número de registros a pular
-            limit: Número máximo de registros a retornar
-            tipo: Filtrar por tipo de lançamento
-            status: Filtrar por status do lançamento
+            skip: Registros para pular
+            limit: Limite de registros
+            tipo: Filtrar por tipo (receita/despesa)
             data_inicio: Filtrar por data inicial
             data_fim: Filtrar por data final
-            id_categoria: Filtrar por categoria
-            id_centro_custo: Filtrar por centro de custo
             id_cliente: Filtrar por cliente
             id_fornecedor: Filtrar por fornecedor
-            id_conta_bancaria: Filtrar por conta bancária
-            id_parcela: Filtrar por parcela
-            descricao: Filtrar por descrição
-            valor_min: Filtrar por valor mínimo
-            valor_max: Filtrar por valor máximo
+            id_conta: Filtrar por conta bancária
+            status: Filtrar por status
             
         Returns:
-            Lista de lançamentos e contagem total
+            Lista paginada de lançamentos
         """
-        self.logger.info(f"Buscando lançamentos com filtros: empresa={id_empresa}, tipo={tipo}, status={status}")
+        logger.info(f"Listando lançamentos para empresa {id_empresa}")
         
-        filters = [{"id_empresa": id_empresa}]
-        
-        if tipo:
-            filters.append({"tipo": tipo})
+        try:
+            # Verificar filtros e validar
+            if id_cliente:
+                cliente = await self.cliente_repository.get_by_id(id_cliente, id_empresa)
+                if not cliente:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Cliente não encontrado"
+                    )
             
-        if status:
-            filters.append({"status": status})
+            if id_fornecedor:
+                fornecedor = await self.fornecedor_repository.get_by_id(id_fornecedor, id_empresa)
+                if not fornecedor:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Fornecedor não encontrado"
+                    )
             
-        if data_inicio:
-            filters.append({"data_lancamento__gte": data_inicio})
+            if id_conta:
+                conta = await self.conta_repository.get_by_id(id_conta, id_empresa)
+                if not conta:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Conta bancária não encontrada"
+                    )
             
-        if data_fim:
-            filters.append({"data_lancamento__lte": data_fim})
+            # Buscar lançamentos
+            lancamentos, total = await self.repository.get_by_empresa(
+                id_empresa=id_empresa,
+                skip=skip,
+                limit=limit,
+                tipo=tipo,
+                data_inicio=data_inicio,
+                data_fim=data_fim,
+                id_cliente=id_cliente,
+                id_fornecedor=id_fornecedor,
+                id_conta=id_conta,
+                status=status
+            )
             
-        if id_categoria:
-            filters.append({"id_categoria": id_categoria})
+            # Converter para schema de resposta
+            items = [LancamentoResponse.model_validate(l) for l in lancamentos]
             
-        if id_centro_custo:
-            filters.append({"id_centro_custo": id_centro_custo})
+            # Criar resposta paginada
+            return PaginatedResponse[LancamentoResponse](
+                items=items,
+                total=total,
+                page=skip // limit + 1 if limit > 0 else 1,
+                size=limit,
+                pages=(total + limit - 1) // limit if limit > 0 else 1
+            )
             
-        if id_cliente:
-            filters.append({"id_cliente": id_cliente})
-            
-        if id_fornecedor:
-            filters.append({"id_fornecedor": id_fornecedor})
-            
-        if id_conta_bancaria:
-            filters.append({"id_conta_bancaria": id_conta_bancaria})
-            
-        if id_parcela:
-            filters.append({"id_parcela": id_parcela})
-            
-        if descricao:
-            filters.append({"descricao__ilike": f"%{descricao}%"})
-            
-        if valor_min is not None:
-            filters.append({"valor__gte": valor_min})
-            
-        if valor_max is not None:
-            filters.append({"valor__lte": valor_max})
-            
-        return await self.repository.list_with_filters(
-            skip=skip,
-            limit=limit,
-            filters=filters
-        )
-        
-    async def criar_lancamento(self, lancamento: LancamentoCreate, id_usuario: UUID) -> Lancamento:
+        except HTTPException:
+            # Repassar exceções HTTP
+            raise
+        except Exception as e:
+            logger.error(f"Erro ao listar lançamentos: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao listar lançamentos: {str(e)}"
+            )
+
+    async def criar_lancamento(self, lancamento_data: LancamentoCreate) -> LancamentoResponse:
         """
         Criar novo lançamento.
         
         Args:
-            lancamento: Dados do lançamento a ser criado
-            id_usuario: ID do usuário que está criando o lançamento
+            lancamento_data: Dados do lançamento
             
         Returns:
             Lançamento criado
             
         Raises:
-            HTTPException: Se ocorrer um erro na validação
+            HTTPException: Se houver erro ao criar
         """
-        self.logger.info(f"Criando novo lançamento para empresa: {lancamento.id_empresa}")
+        logger.info(f"Criando novo lançamento para empresa {lancamento_data.id_empresa}")
         
-        # Validar valor
-        if lancamento.valor <= 0:
-            self.logger.warning(f"Valor inválido: {lancamento.valor}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Valor deve ser maior que zero"
-            )
-            
-        # Validar categoria
-        if lancamento.id_categoria:
-            categoria = await self.categoria_repository.get_by_id(lancamento.id_categoria, lancamento.id_empresa)
-            if not categoria:
-                self.logger.warning(f"Categoria não encontrada: {lancamento.id_categoria}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Categoria não encontrada"
-                )
-                
-            # Validar tipo de categoria conforme o tipo de lançamento
-            if lancamento.tipo == TipoLancamento.RECEITA and categoria.tipo != "RECEITA":
-                self.logger.warning(f"Categoria incompatível com o tipo do lançamento: {categoria.tipo}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Para lançamentos do tipo RECEITA, a categoria também deve ser do tipo RECEITA"
-                )
-                
-            if lancamento.tipo == TipoLancamento.DESPESA and categoria.tipo != "DESPESA":
-                self.logger.warning(f"Categoria incompatível com o tipo do lançamento: {categoria.tipo}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Para lançamentos do tipo DESPESA, a categoria também deve ser do tipo DESPESA"
-                )
-                
-        # Validar centro de custo
-        if lancamento.id_centro_custo:
-            centro_custo = await self.centro_custo_repository.get_by_id(lancamento.id_centro_custo, lancamento.id_empresa)
-            if not centro_custo:
-                self.logger.warning(f"Centro de custo não encontrado: {lancamento.id_centro_custo}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Centro de custo não encontrado"
-                )
-                
-        # Validar cliente
-        if lancamento.id_cliente:
-            cliente = await self.cliente_repository.get_by_id(lancamento.id_cliente, lancamento.id_empresa)
-            if not cliente:
-                self.logger.warning(f"Cliente não encontrado: {lancamento.id_cliente}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cliente não encontrado"
-                )
-                
-        # Validar fornecedor
-        if lancamento.id_fornecedor:
-            fornecedor = await self.fornecedor_repository.get_by_id(lancamento.id_fornecedor, lancamento.id_empresa)
-            if not fornecedor:
-                self.logger.warning(f"Fornecedor não encontrado: {lancamento.id_fornecedor}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Fornecedor não encontrado"
-                )
-                
-        # Validar conta bancária
-        if lancamento.id_conta_bancaria:
-            conta = await self.conta_bancaria_repository.get_by_id(lancamento.id_conta_bancaria, lancamento.id_empresa)
-            if not conta:
-                self.logger.warning(f"Conta bancária não encontrada: {lancamento.id_conta_bancaria}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Conta bancária não encontrada"
-                )
-                
-        # Validar parcela
-        if lancamento.id_parcela:
-            parcela = await self.parcela_repository.get_by_id(lancamento.id_parcela, lancamento.id_empresa)
-            if not parcela:
-                self.logger.warning(f"Parcela não encontrada: {lancamento.id_parcela}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Parcela não encontrada"
-                )
-                
-        # Criar lançamento
         try:
-            lancamento_data = lancamento.model_dump()
-            
-            # Adicionar data atual se não fornecida
-            if "data_lancamento" not in lancamento_data or lancamento_data["data_lancamento"] is None:
-                lancamento_data["data_lancamento"] = datetime.now().date()
-                
-            # Definir status padrão se não fornecido
-            if "status" not in lancamento_data or lancamento_data["status"] is None:
-                lancamento_data["status"] = StatusLancamento.PENDENTE
-                
-            novo_lancamento = await self.repository.create(lancamento_data)
-            
-            # Registrar log
-            await self.log_service.registrar_log(
-                LogSistemaCreate(
-                    id_empresa=lancamento.id_empresa,
-                    id_usuario=id_usuario,
-                    acao="criar_lancamento",
-                    descricao=f"Lançamento criado com ID {novo_lancamento.id_lancamento}",
-                    dados={
-                        "id_lancamento": str(novo_lancamento.id_lancamento), 
-                        "tipo": novo_lancamento.tipo.value,
-                        "valor": float(novo_lancamento.valor)
-                    }
+            # Verificar se o cliente existe, se fornecido
+            if lancamento_data.id_cliente:
+                cliente = await self.cliente_repository.get_by_id(
+                    lancamento_data.id_cliente, 
+                    lancamento_data.id_empresa
                 )
-            )
+                if not cliente:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Cliente não encontrado ou não pertence a esta empresa"
+                    )
             
-            return novo_lancamento
+            # Verificar se o fornecedor existe, se fornecido
+            if lancamento_data.id_fornecedor:
+                fornecedor = await self.fornecedor_repository.get_by_id(
+                    lancamento_data.id_fornecedor, 
+                    lancamento_data.id_empresa
+                )
+                if not fornecedor:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Fornecedor não encontrado ou não pertence a esta empresa"
+                    )
+            
+            # Verificar se conta bancária existe e pertence à empresa
+            conta = await self.conta_repository.get_by_id(
+                lancamento_data.id_conta, 
+                lancamento_data.id_empresa
+            )
+            if not conta:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Conta bancária não encontrada ou não pertence a esta empresa"
+                )
+            
+            # Verificar se forma de pagamento existe e pertence à empresa
+            forma = await self.forma_pagamento_repository.get_by_id(
+                lancamento_data.id_forma_pagamento, 
+                lancamento_data.id_empresa
+            )
+            if not forma:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Forma de pagamento não encontrada ou não pertence a esta empresa"
+                )
+            
+            # Preparar dados para criação
+            lancamento_dict = lancamento_data.model_dump()
+            
+            # Criar o lançamento
+            lancamento = await self.repository.create(lancamento_dict)
+            
+            # Atualizar saldo da conta se o lançamento estiver efetivado
+            if lancamento.status == "efetivado":
+                await self._atualizar_saldo_conta(lancamento)
+            
+            return LancamentoResponse.model_validate(lancamento)
+            
+        except HTTPException:
+            # Repassar exceções HTTP
+            raise
         except Exception as e:
-            self.logger.error(f"Erro ao criar lançamento: {str(e)}")
+            logger.error(f"Erro ao criar lançamento: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro ao criar lançamento"
+                detail=f"Erro ao criar lançamento: {str(e)}"
             )
-        
-    async def atualizar_lancamento(self, id_lancamento: UUID, lancamento: LancamentoUpdate, id_empresa: UUID, id_usuario: UUID) -> Lancamento:
+
+    async def atualizar_lancamento(
+        self, 
+        id_lancamento: UUID, 
+        lancamento_data: LancamentoUpdate, 
+        id_empresa: UUID
+    ) -> LancamentoResponse:
         """
         Atualizar lançamento existente.
         
         Args:
-            id_lancamento: ID do lançamento a ser atualizado
-            lancamento: Dados para atualização
-            id_empresa: ID da empresa para validação de acesso
-            id_usuario: ID do usuário que está atualizando o lançamento
+            id_lancamento: ID do lançamento
+            lancamento_data: Dados para atualização
+            id_empresa: ID da empresa
             
         Returns:
             Lançamento atualizado
             
         Raises:
-            HTTPException: Se o lançamento não for encontrado ou ocorrer erro na validação
+            HTTPException: Se o lançamento não for encontrado ou houver erro
         """
-        self.logger.info(f"Atualizando lançamento: {id_lancamento}")
+        logger.info(f"Atualizando lançamento {id_lancamento}")
         
-        # Verificar se o lançamento existe
-        lancamento_atual = await self.get_lancamento(id_lancamento, id_empresa)
-        
-        # Validações de atualização
-        
-        # Não permitir alterar tipo de lançamento já efetivado
-        if lancamento.tipo and lancamento.tipo != lancamento_atual.tipo and lancamento_atual.status == StatusLancamento.EFETIVADO:
-            self.logger.warning(f"Não é possível alterar o tipo de um lançamento efetivado: {id_lancamento}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Não é possível alterar o tipo de um lançamento efetivado"
-            )
-            
-        # Validar valor se estiver sendo atualizado
-        if lancamento.valor is not None and lancamento.valor <= 0:
-            self.logger.warning(f"Valor inválido: {lancamento.valor}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Valor deve ser maior que zero"
-            )
-            
-        # Validar categoria se estiver sendo atualizada
-        if lancamento.id_categoria:
-            categoria = await self.categoria_repository.get_by_id(lancamento.id_categoria, id_empresa)
-            if not categoria:
-                self.logger.warning(f"Categoria não encontrada: {lancamento.id_categoria}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Categoria não encontrada"
-                )
-                
-            # Definir o tipo de lançamento para validar com a categoria
-            tipo_lancamento = lancamento.tipo if lancamento.tipo else lancamento_atual.tipo
-                
-            # Validar tipo de categoria conforme o tipo de lançamento
-            if tipo_lancamento == TipoLancamento.RECEITA and categoria.tipo != "RECEITA":
-                self.logger.warning(f"Categoria incompatível com o tipo do lançamento: {categoria.tipo}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Para lançamentos do tipo RECEITA, a categoria também deve ser do tipo RECEITA"
-                )
-                
-            if tipo_lancamento == TipoLancamento.DESPESA and categoria.tipo != "DESPESA":
-                self.logger.warning(f"Categoria incompatível com o tipo do lançamento: {categoria.tipo}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Para lançamentos do tipo DESPESA, a categoria também deve ser do tipo DESPESA"
-                )
-                
-        # Demais validações seguem o mesmo padrão do método criar_lancamento
-        
-        # Validar centro de custo
-        if lancamento.id_centro_custo:
-            centro_custo = await self.centro_custo_repository.get_by_id(lancamento.id_centro_custo, id_empresa)
-            if not centro_custo:
-                self.logger.warning(f"Centro de custo não encontrado: {lancamento.id_centro_custo}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Centro de custo não encontrado"
-                )
-                
-        # Validar cliente
-        if lancamento.id_cliente:
-            cliente = await self.cliente_repository.get_by_id(lancamento.id_cliente, id_empresa)
-            if not cliente:
-                self.logger.warning(f"Cliente não encontrado: {lancamento.id_cliente}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cliente não encontrado"
-                )
-                
-        # Validar fornecedor
-        if lancamento.id_fornecedor:
-            fornecedor = await self.fornecedor_repository.get_by_id(lancamento.id_fornecedor, id_empresa)
-            if not fornecedor:
-                self.logger.warning(f"Fornecedor não encontrado: {lancamento.id_fornecedor}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Fornecedor não encontrado"
-                )
-                
-        # Validar conta bancária
-        if lancamento.id_conta_bancaria:
-            conta = await self.conta_bancaria_repository.get_by_id(lancamento.id_conta_bancaria, id_empresa)
-            if not conta:
-                self.logger.warning(f"Conta bancária não encontrada: {lancamento.id_conta_bancaria}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Conta bancária não encontrada"
-                )
-                
-        # Validar parcela
-        if lancamento.id_parcela:
-            parcela = await self.parcela_repository.get_by_id(lancamento.id_parcela, id_empresa)
-            if not parcela:
-                self.logger.warning(f"Parcela não encontrada: {lancamento.id_parcela}")
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Parcela não encontrada"
-                )
-                
-        # Atualizar lançamento
         try:
-            # Remover campos None do modelo de atualização
-            update_data = {k: v for k, v in lancamento.model_dump().items() if v is not None}
+            # Verificar se o lançamento existe
+            lancamento_atual = await self.repository.get_by_id(id_lancamento, id_empresa)
             
-            lancamento_atualizado = await self.repository.update(id_lancamento, update_data, id_empresa)
-            
-            if not lancamento_atualizado:
-                self.logger.warning(f"Lançamento não encontrado após tentativa de atualização: {id_lancamento}")
+            if not lancamento_atual:
+                logger.warning(f"Lançamento {id_lancamento} não encontrado para atualização")
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Lançamento não encontrado"
                 )
-                
-            # Registrar log
-            await self.log_service.registrar_log(
-                LogSistemaCreate(
-                    id_empresa=id_empresa,
-                    id_usuario=id_usuario,
-                    acao="atualizar_lancamento",
-                    descricao=f"Lançamento atualizado com ID {id_lancamento}",
-                    dados={"id_lancamento": str(id_lancamento), "atualizacoes": update_data}
+            
+            # Guardar status e conta antigos para verificar mudanças
+            status_antigo = lancamento_atual.status
+            conta_antiga_id = lancamento_atual.id_conta
+            
+            # Verificar se cliente existe, se estiver sendo alterado
+            if lancamento_data.id_cliente and lancamento_data.id_cliente != lancamento_atual.id_cliente:
+                cliente = await self.cliente_repository.get_by_id(
+                    lancamento_data.id_cliente, 
+                    id_empresa
                 )
+                if not cliente:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Cliente não encontrado ou não pertence a esta empresa"
+                    )
+            
+            # Verificar se fornecedor existe, se estiver sendo alterado
+            if lancamento_data.id_fornecedor and lancamento_data.id_fornecedor != lancamento_atual.id_fornecedor:
+                fornecedor = await self.fornecedor_repository.get_by_id(
+                    lancamento_data.id_fornecedor, 
+                    id_empresa
+                )
+                if not fornecedor:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Fornecedor não encontrado ou não pertence a esta empresa"
+                    )
+            
+            # Verificar se conta bancária existe, se estiver sendo alterada
+            if lancamento_data.id_conta and lancamento_data.id_conta != lancamento_atual.id_conta:
+                conta = await self.conta_repository.get_by_id(
+                    lancamento_data.id_conta, 
+                    id_empresa
+                )
+                if not conta:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Conta bancária não encontrada ou não pertence a esta empresa"
+                    )
+            
+            # Verificar se forma de pagamento existe, se estiver sendo alterada
+            if lancamento_data.id_forma_pagamento and lancamento_data.id_forma_pagamento != lancamento_atual.id_forma_pagamento:
+                forma = await self.forma_pagamento_repository.get_by_id(
+                    lancamento_data.id_forma_pagamento, 
+                    id_empresa
+                )
+                if not forma:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Forma de pagamento não encontrada ou não pertence a esta empresa"
+                    )
+            
+            # Verificar consistência entre status e data de efetivação
+            if lancamento_data.status == "efetivado" and not lancamento_atual.data_efetivacao:
+                if not lancamento_data.data_efetivacao:
+                    lancamento_data.data_efetivacao = datetime.now()
+            
+            # Preparar dados para atualização
+            lancamento_dict = lancamento_data.model_dump(exclude_unset=True)
+            
+            # Atualizar lançamento
+            lancamento_atualizado = await self.repository.update(
+                id_lancamento, 
+                id_empresa, 
+                lancamento_dict
             )
             
-            return lancamento_atualizado
+            if not lancamento_atualizado:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Lançamento não encontrado"
+                )
+            
+            # Atualizar saldo da conta se o status mudou para/de efetivado ou se a conta mudou
+            if (status_antigo != lancamento_atualizado.status and 
+                (status_antigo == "efetivado" or lancamento_atualizado.status == "efetivado")):
+                await self._atualizar_saldo_conta(lancamento_atualizado)
+                
+                # Se mudou de conta, estornar da conta antiga
+                if lancamento_atualizado.status == "efetivado" and conta_antiga_id != lancamento_atualizado.id_conta:
+                    await self._estornar_saldo_conta(lancamento_atualizado, conta_antiga_id)
+            
+            return LancamentoResponse.model_validate(lancamento_atualizado)
+            
+        except HTTPException:
+            # Repassar exceções HTTP
+            raise
         except Exception as e:
-            self.logger.error(f"Erro ao atualizar lançamento: {str(e)}")
+            logger.error(f"Erro ao atualizar lançamento: {str(e)}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro ao atualizar lançamento"
+                detail=f"Erro ao atualizar lançamento: {str(e)}"
             )
-            
-    async def efetivar_lancamento(self, id_lancamento: UUID, id_empresa: UUID, id_usuario: UUID, data_efetivacao: Optional[date] = None) -> Lancamento:
+
+    async def remover_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> bool:
         """
-        Efetivar um lançamento.
+        Remover lançamento.
         
         Args:
-            id_lancamento: ID do lançamento a ser efetivado
-            id_empresa: ID da empresa para validação de acesso
-            id_usuario: ID do usuário que está efetivando o lançamento
-            data_efetivacao: Data da efetivação (padrão: data atual)
+            id_lancamento: ID do lançamento
+            id_empresa: ID da empresa
+            
+        Returns:
+            True se removido com sucesso
+            
+        Raises:
+            HTTPException: Se o lançamento não for encontrado ou se houver erro
+        """
+        logger.info(f"Removendo lançamento {id_lancamento}")
+        
+        try:
+            # Verificar se o lançamento existe
+            lancamento = await self.repository.get_by_id(id_lancamento, id_empresa)
+            
+            if not lancamento:
+                logger.warning(f"Lançamento {id_lancamento} não encontrado para remoção")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Lançamento não encontrado"
+                )
+            
+            # Se o lançamento estiver efetivado, estornar o saldo da conta
+            if lancamento.status == "efetivado":
+                await self._estornar_saldo_conta(lancamento)
+            
+            # Remover o lançamento
+            sucesso = await self.repository.delete(id_lancamento, id_empresa)
+            
+            if not sucesso:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Lançamento não encontrado ou não pôde ser removido"
+                )
+                
+            return True
+            
+        except HTTPException:
+            # Repassar exceções HTTP
+            raise
+        except Exception as e:
+            logger.error(f"Erro ao remover lançamento: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao remover lançamento: {str(e)}"
+            )
+
+    async def efetivar_lancamento(self, id_lancamento: UUID, id_empresa: UUID, data_efetivacao: Optional[date] = None) -> LancamentoResponse:
+        """
+        Efetivar um lançamento (alterar status de pendente para efetivado).
+        
+        Args:
+            id_lancamento: ID do lançamento
+            id_empresa: ID da empresa
+            data_efetivacao: Data de efetivação (opcional, padrão=hoje)
             
         Returns:
             Lançamento efetivado
             
         Raises:
-            HTTPException: Se o lançamento não for encontrado ou já estiver efetivado
+            HTTPException: Se o lançamento não for encontrado ou houver erro
         """
-        self.logger.info(f"Efetivando lançamento: {id_lancamento}")
+        logger.info(f"Efetivando lançamento {id_lancamento}")
         
-        # Verificar se o lançamento existe
-        lancamento = await self.get_lancamento(id_lancamento, id_empresa)
-        
-        # Verificar se já está efetivado
-        if lancamento.status == StatusLancamento.EFETIVADO:
-            self.logger.warning(f"Lançamento já está efetivado: {id_lancamento}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Lançamento já está efetivado"
-            )
+        try:
+            # Buscar o lançamento
+            lancamento = await self.repository.get_by_id(id_lancamento, id_empresa)
             
-        # Verificar se está cancelado
-        if lancamento.status == StatusLancamento.CANCELADO:
-            self.logger.warning(f"Não é possível efetivar um lançamento cancelado: {id_lancamento}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Não é possível efetivar um lançamento cancelado"
-            )
+            if not lancamento:
+                logger.warning(f"Lançamento {id_lancamento} não encontrado")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Lançamento não encontrado"
+                )
             
-        # Verificar se tem conta bancária associada
-        if not lancamento.id_conta_bancaria:
-            self.logger.warning(f"Lançamento sem conta bancária associada: {id_lancamento}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="É necessário associar uma conta bancária para efetivar o lançamento"
-            )
+            # Verificar se já está efetivado
+            if lancamento.status == "efetivado":
+                return LancamentoResponse.model_validate(lancamento)
             
-        # Atualizar lançamento como efetivado
-        update_data = {
-            "status": StatusLancamento.EFETIVADO,
-            "data_efetivacao": data_efetivacao or datetime.now().date()
-        }
-        
-        lancamento_efetivado = await self.repository.update(id_lancamento, update_data, id_empresa)
-        
-        # Atualizar saldo da conta bancária
-        # Nota: Em um sistema real, isso provavelmente seria feito em uma transação
-        # para garantir a consistência dos dados
-        # Aqui estamos apenas simulando
-        
-        # Registrar log
-        await self.log_service.registrar_log(
-            LogSistemaCreate(
-                id_empresa=id_empresa,
-                id_usuario=id_usuario,
-                acao="efetivar_lancamento",
-                descricao=f"Lançamento efetivado com ID {id_lancamento}",
-                dados={
-                    "id_lancamento": str(id_lancamento),
-                    "data_efetivacao": str(update_data["data_efetivacao"]),
-                    "valor": float(lancamento.valor),
-                    "tipo": lancamento.tipo.value
-                }
+            # Verificar se está cancelado
+            if lancamento.status == "cancelado":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Não é possível efetivar um lançamento cancelado"
+                )
+            
+            # Efetivar o lançamento
+            lancamento_efetivado = await self.repository.efetivar_lancamento(id_lancamento, id_empresa)
+            
+            # Atualizar saldo da conta
+            await self._atualizar_saldo_conta(lancamento_efetivado)
+            
+            return LancamentoResponse.model_validate(lancamento_efetivado)
+            
+        except HTTPException:
+            # Repassar exceções HTTP
+            raise
+        except Exception as e:
+            logger.error(f"Erro ao efetivar lançamento: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao efetivar lançamento: {str(e)}"
             )
-        )
-        
-        return lancamento_efetivado
-        
-    async def cancelar_lancamento(self, id_lancamento: UUID, id_empresa: UUID, id_usuario: UUID, motivo: str) -> Lancamento:
+
+    async def cancelar_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> LancamentoResponse:
         """
         Cancelar um lançamento.
         
         Args:
-            id_lancamento: ID do lançamento a ser cancelado
-            id_empresa: ID da empresa para validação de acesso
-            id_usuario: ID do usuário que está cancelando o lançamento
-            motivo: Motivo do cancelamento
+            id_lancamento: ID do lançamento
+            id_empresa: ID da empresa
             
         Returns:
             Lançamento cancelado
             
         Raises:
-            HTTPException: Se o lançamento não for encontrado ou já estiver cancelado
+            HTTPException: Se o lançamento não for encontrado ou houver erro
         """
-        self.logger.info(f"Cancelando lançamento: {id_lancamento}")
+        logger.info(f"Cancelando lançamento {id_lancamento}")
         
-        # Verificar se o lançamento existe
-        lancamento = await self.get_lancamento(id_lancamento, id_empresa)
-        
-        # Verificar se já está cancelado
-        if lancamento.status == StatusLancamento.CANCELADO:
-            self.logger.warning(f"Lançamento já está cancelado: {id_lancamento}")
+        try:
+            # Buscar o lançamento
+            lancamento = await self.repository.get_by_id(id_lancamento, id_empresa)
+            
+            if not lancamento:
+                logger.warning(f"Lançamento {id_lancamento} não encontrado")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Lançamento não encontrado"
+                )
+            
+            # Verificar se já está cancelado
+            if lancamento.status == "cancelado":
+                return LancamentoResponse.model_validate(lancamento)
+            
+            # Se estava efetivado, estornar o saldo da conta
+            if lancamento.status == "efetivado":
+                await self._estornar_saldo_conta(lancamento)
+            
+            # Cancelar o lançamento
+            lancamento_cancelado = await self.repository.cancelar_lancamento(id_lancamento, id_empresa)
+            
+            return LancamentoResponse.model_validate(lancamento_cancelado)
+            
+        except HTTPException:
+            # Repassar exceções HTTP
+            raise
+        except Exception as e:
+            logger.error(f"Erro ao cancelar lançamento: {str(e)}")
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Lançamento já está cancelado"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao cancelar lançamento: {str(e)}"
             )
-            
-        # Se já foi efetivado, será necessário reverter o saldo da conta
-        if lancamento.status == StatusLancamento.EFETIVADO:
-            self.logger.warning(f"Cancelando lançamento já efetivado: {id_lancamento}")
-            # Nota: Em um sistema real, isso provavelmente seria feito em uma transação
-            # para garantir a consistência dos dados
-            # Aqui estamos apenas simulando
-            
-        # Cancelar lançamento
-        update_data = {
-            "status": StatusLancamento.CANCELADO,
-            "observacoes": f"CANCELADO: {motivo}" if not lancamento.observacoes else f"{lancamento.observacoes}\nCANCELADO: {motivo}"
-        }
-        
-        lancamento_cancelado = await self.repository.update(id_lancamento, update_data, id_empresa)
-        
-        # Registrar log
-        await self.log_service.registrar_log(
-            LogSistemaCreate(
-                id_empresa=id_empresa,
-                id_usuario=id_usuario,
-                acao="cancelar_lancamento",
-                descricao=f"Lançamento cancelado com ID {id_lancamento}",
-                dados={
-                    "id_lancamento": str(id_lancamento),
-                    "motivo": motivo,
-                    "valor": float(lancamento.valor),
-                    "tipo": lancamento.tipo.value
-                }
-            )
-        )
-        
-        return lancamento_cancelado
-        
-    async def remover_lancamento(self, id_lancamento: UUID, id_empresa: UUID, id_usuario: UUID) -> Dict[str, Any]:
+
+    async def get_totais(
+        self, 
+        id_empresa: UUID,
+        data_inicio: Optional[date] = None,
+        data_fim: Optional[date] = None,
+        id_cliente: Optional[UUID] = None,
+        id_fornecedor: Optional[UUID] = None,
+        id_conta: Optional[UUID] = None
+    ) -> Dict[str, Any]:
         """
-        Remover lançamento pelo ID.
+        Calcular totais de lançamentos.
         
         Args:
-            id_lancamento: ID do lançamento a ser removido
-            id_empresa: ID da empresa para validação de acesso
-            id_usuario: ID do usuário que está removendo o lançamento
+            id_empresa: ID da empresa
+            data_inicio: Filtrar por data inicial
+            data_fim: Filtrar por data final
+            id_cliente: Filtrar por cliente
+            id_fornecedor: Filtrar por fornecedor
+            id_conta: Filtrar por conta bancária
             
         Returns:
-            Mensagem de confirmação
-            
-        Raises:
-            HTTPException: Se o lançamento não for encontrado ou não puder ser removido
+            Dicionário com os totais calculados
         """
-        self.logger.info(f"Removendo lançamento: {id_lancamento}")
+        logger.info(f"Calculando totais de lançamentos para empresa {id_empresa}")
         
-        # Verificar se o lançamento existe
-        lancamento = await self.get_lancamento(id_lancamento, id_empresa)
-        
-        # Verificar status
-        if lancamento.status == StatusLancamento.EFETIVADO:
-            self.logger.warning(f"Não é possível remover um lançamento efetivado: {id_lancamento}")
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Não é possível remover um lançamento efetivado. Cancele-o primeiro."
+        try:
+            # Obter lançamentos de receita
+            receitas, _ = await self.repository.get_by_empresa(
+                id_empresa=id_empresa,
+                tipo="receita",
+                data_inicio=data_inicio,
+                data_fim=data_fim,
+                id_cliente=id_cliente,
+                id_fornecedor=id_fornecedor,
+                id_conta=id_conta,
+                status="efetivado"
             )
             
-        # Remover lançamento
-        await self.repository.delete(id_lancamento, id_empresa)
-        
-        # Registrar log
-        await self.log_service.registrar_log(
-            LogSistemaCreate(
+            # Obter lançamentos de despesa
+            despesas, _ = await self.repository.get_by_empresa(
                 id_empresa=id_empresa,
-                id_usuario=id_usuario,
-                acao="remover_lancamento",
-                descricao=f"Lançamento removido com ID {id_lancamento}",
-                dados={"id_lancamento": str(id_lancamento)}
+                tipo="despesa",
+                data_inicio=data_inicio,
+                data_fim=data_fim,
+                id_cliente=id_cliente,
+                id_fornecedor=id_fornecedor,
+                id_conta=id_conta,
+                status="efetivado"
             )
-        )
+            
+            # Obter lançamentos pendentes
+            pendentes, _ = await self.repository.get_by_empresa(
+                id_empresa=id_empresa,
+                data_inicio=data_inicio,
+                data_fim=data_fim,
+                id_cliente=id_cliente,
+                id_fornecedor=id_fornecedor,
+                id_conta=id_conta,
+                status="pendente"
+            )
+            
+            # Obter lançamentos cancelados
+            cancelados, _ = await self.repository.get_by_empresa(
+                id_empresa=id_empresa,
+                data_inicio=data_inicio,
+                data_fim=data_fim,
+                id_cliente=id_cliente,
+                id_fornecedor=id_fornecedor,
+                id_conta=id_conta,
+                status="cancelado"
+            )
+            
+            # Calcular totais
+            total_receitas = sum(l.valor for l in receitas)
+            total_despesas = sum(l.valor for l in despesas)
+            total_pendentes = sum(l.valor for l in pendentes)
+            total_cancelados = sum(l.valor for l in cancelados)
+            saldo = total_receitas - total_despesas
+            
+            return {
+                "total_receitas": float(total_receitas),
+                "total_despesas": float(total_despesas),
+                "saldo": float(saldo),
+                "total_pendentes": float(total_pendentes),
+                "total_efetivados": float(total_receitas + total_despesas),
+                "total_cancelados": float(total_cancelados)
+            }
+            
+        except Exception as e:
+            logger.error(f"Erro ao calcular totais de lançamentos: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao calcular totais de lançamentos: {str(e)}"
+            )
+
+    async def _atualizar_saldo_conta(
+        self, 
+        lancamento: Lancamento
+    ) -> None:
+        """
+        Atualizar o saldo da conta bancária com base no lançamento.
         
-        return {"detail": "Lançamento removido com sucesso"} 
+        Args:
+            lancamento: Objeto do lançamento
+        """
+        try:
+            # Se foi cancelado, não alterar o saldo
+            if lancamento.status == "cancelado":
+                return
+            
+            # Buscar a conta
+            conta = await self.conta_repository.get_by_id(lancamento.id_conta, lancamento.id_empresa)
+            if not conta:
+                logger.warning(f"Conta bancária não encontrada para atualização de saldo: {lancamento.id_conta}")
+                return
+            
+            # Se for efetivado e receita, aumentar o saldo
+            if lancamento.status == "efetivado" and lancamento.tipo == "receita":
+                conta.saldo_atual += lancamento.valor
+            
+            # Se for efetivado e despesa, diminuir o saldo
+            if lancamento.status == "efetivado" and lancamento.tipo == "despesa":
+                conta.saldo_atual -= lancamento.valor
+            
+            # Atualizar a conta
+            await self.conta_repository.update(conta.id_conta, {"saldo_atual": conta.saldo_atual}, lancamento.id_empresa)
+            
+        except Exception as e:
+            logger.error(f"Erro ao atualizar saldo da conta: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao atualizar saldo da conta: {str(e)}"
+            )
+
+    async def _estornar_saldo_conta(
+        self, 
+        lancamento: Lancamento, 
+        id_conta_antiga: Optional[UUID] = None
+    ) -> None:
+        """
+        Estornar o valor do lançamento do saldo da conta.
+        
+        Args:
+            lancamento: Objeto do lançamento
+            id_conta_antiga: ID da conta anterior, se houve mudança de conta
+        """
+        try:
+            # Determinar qual conta usar
+            id_conta = id_conta_antiga if id_conta_antiga else lancamento.id_conta
+            
+            # Buscar a conta
+            conta = await self.conta_repository.get_by_id(id_conta, lancamento.id_empresa)
+            if not conta:
+                logger.warning(f"Conta bancária não encontrada para estorno: {id_conta}")
+                return
+            
+            # Estornar conforme o tipo
+            if lancamento.tipo == "receita":
+                conta.saldo_atual -= lancamento.valor
+            else:
+                conta.saldo_atual += lancamento.valor
+            
+            # Atualizar a conta
+            await self.conta_repository.update(conta.id_conta, {"saldo_atual": conta.saldo_atual}, lancamento.id_empresa)
+            
+        except Exception as e:
+            logger.error(f"Erro ao estornar saldo da conta: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao estornar saldo da conta: {str(e)}"
+            )

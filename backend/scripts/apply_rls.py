@@ -40,15 +40,19 @@ def execute_sql_file(cursor, file_path):
         return False
 
 
-def apply_rls():
+def apply_rls(use_full_script=False):
     """
     Aplica as configurações RLS no banco de dados Supabase.
+    
+    Args:
+        use_full_script: Se True, aplica o script completo (01_enable_rls.sql), 
+                         caso contrário usa o script para tabelas existentes (enable_only_existing.sql).
     """
     conn = None
     try:
         # Conectar ao banco de dados usando a string de conexão do Supabase
         logger.info("Conectando ao banco de dados Supabase...")
-        conn = psycopg2.connect(settings.DATABASE_URI)
+        conn = psycopg2.connect(settings.DATABASE_URL)
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         
         # Criar cursor
@@ -59,7 +63,12 @@ def apply_rls():
                               "migrations", "rls")
         
         # Arquivo para ativar RLS
-        rls_file = os.path.join(rls_dir, "01_enable_rls.sql")
+        if use_full_script:
+            rls_file = os.path.join(rls_dir, "01_enable_rls.sql")
+            logger.info("Usando script completo para todas as tabelas...")
+        else:
+            rls_file = os.path.join(rls_dir, "enable_only_existing.sql")
+            logger.info("Usando script apenas para tabelas existentes...")
         
         # Executar arquivo SQL
         if execute_sql_file(cursor, rls_file):
@@ -88,7 +97,7 @@ def disable_rls():
     try:
         # Conectar ao banco de dados
         logger.info("Conectando ao banco de dados Supabase...")
-        conn = psycopg2.connect(settings.DATABASE_URI)
+        conn = psycopg2.connect(settings.DATABASE_URL)
         conn.set_isolation_level(ISOLATION_LEVEL_AUTOCOMMIT)
         
         # Criar cursor
@@ -125,6 +134,7 @@ if __name__ == "__main__":
     # Configurar parser de argumentos
     parser = argparse.ArgumentParser(description="Gerenciar configurações de Row-Level Security (RLS) no Supabase")
     parser.add_argument("--disable", action="store_true", help="Desativar RLS ao invés de ativar")
+    parser.add_argument("--all-tables", action="store_true", help="Aplicar RLS em todas as tabelas (mesmo as que não existem)")
     
     # Obter argumentos
     args = parser.parse_args()
@@ -137,4 +147,4 @@ if __name__ == "__main__":
         else:
             logger.info("Operação cancelada.")
     else:
-        apply_rls() 
+        apply_rls(use_full_script=args.all_tables) 

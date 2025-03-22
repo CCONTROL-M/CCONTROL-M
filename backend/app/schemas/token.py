@@ -18,6 +18,15 @@ class Token(BaseModel):
     telas_permitidas: Optional[dict] = None
 
 
+class TokenData(BaseModel):
+    """Schema para dados contidos no token JWT."""
+    id_usuario: Optional[UUID] = None
+    email: Optional[str] = None
+    id_empresa: Optional[UUID] = None
+    admin: Optional[bool] = False
+    exp: Optional[int] = None
+
+
 class TokenPayload(BaseModel):
     """Payload do token JWT."""
     

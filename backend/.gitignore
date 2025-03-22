@@ -1,0 +1,48 @@
+# Ambiente Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+.env/
+ENV/
+.venv/
+
+# Ambiente de desenvolvimento
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Configurações sensíveis
+.env
+.env.prod
+*.pem
+*.key
+secrets/
+
+# Logs e dados temporários
+logs/
+*.log
+*.sqlite
+*.db
+server.pid
+uploads/
+
+# Coverage e testes
+.coverage
+htmlcov/
+.pytest_cache/
+coverage.xml
+*.cover
+
+# Arquivos gerados por build
+dist/
+build/
+*.egg-info/
+
+# Docker
+.docker/
+docker-volumes/ 

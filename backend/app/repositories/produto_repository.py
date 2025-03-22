@@ -1,14 +1,15 @@
 from uuid import UUID
-from typing import List, Optional, Dict, Any
-from sqlalchemy.orm import Session
-from sqlalchemy import desc, asc, or_, func
+from typing import List, Optional, Dict, Any, Tuple
+from sqlalchemy import select, func, or_, update, desc, asc
+from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 from decimal import Decimal
 
 from app.models.produto import Produto
-from app.schemas.produto import ProdutoCreate, ProdutoUpdate, ProdutosPaginados
+from app.schemas.produto import ProdutoCreate, ProdutoUpdate, ProdutoList
 from app.utils.logging_config import get_logger
 from app.repositories.base_repository import BaseRepository
+from app.database import db_session
 
 # Configurar logger
 logger = get_logger(__name__)
@@ -16,541 +17,354 @@ logger = get_logger(__name__)
 class ProdutoRepository(BaseRepository[Produto, ProdutoCreate, ProdutoUpdate]):
     """Repositório para operações com produtos."""
     
-    def __init__(self):
-        """Inicializa o repositório com o modelo Produto."""
+    def __init__(self, session: AsyncSession):
+        """
+        Inicializa o repositório com o modelo Produto e a sessão.
+        
+        Args:
+            session: Sessão assíncrona do SQLAlchemy
+        """
+        self.session = session
         super().__init__(Produto)
     
-    def get(self, db: Session, id: UUID) -> Optional[Produto]:
+    async def get_by_id(self, id_produto: UUID, id_empresa: Optional[UUID] = None) -> Optional[Produto]:
         """
         Obtém um produto pelo ID.
         
         Args:
-            db: Sessão do banco de dados
-            id: ID do produto
+            id_produto: ID do produto
+            id_empresa: ID da empresa para validação
             
         Returns:
             Produto: Produto encontrado ou None
         """
-        return db.query(Produto).filter(Produto.id_produto == id).first()
+        query = select(Produto).where(Produto.id_produto == id_produto)
+        
+        if id_empresa:
+            query = query.where(Produto.id_empresa == id_empresa)
+            
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_by_empresa(self, db: Session, id_empresa: UUID) -> List[Produto]:
+    async def get_by_empresa(self, id_empresa: UUID) -> List[Produto]:
         """
         Obtém todos os produtos de uma empresa.
         
         Args:
-            db: Sessão do banco de dados
             id_empresa: ID da empresa
             
         Returns:
             List[Produto]: Lista de produtos da empresa
         """
-        return db.query(Produto).filter(Produto.id_empresa == id_empresa).all()
+        query = select(Produto).where(Produto.id_empresa == id_empresa)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
     
-    def get_by_codigo(self, db: Session, codigo: str, id_empresa: UUID) -> Optional[Produto]:
+    async def get_by_codigo(self, codigo: str, id_empresa: UUID) -> Optional[Produto]:
         """
         Obtém um produto pelo código dentro de uma empresa específica.
         
         Args:
-            db: Sessão do banco de dados
             codigo: Código do produto
             id_empresa: ID da empresa
             
         Returns:
             Produto: Produto encontrado ou None
         """
-        return db.query(Produto).filter(
+        query = select(Produto).where(
             Produto.codigo == codigo,
             Produto.id_empresa == id_empresa
-        ).first()
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_by_codigo_barras(self, db: Session, codigo_barras: str, id_empresa: UUID) -> Optional[Produto]:
+    async def get_by_codigo_barras(self, codigo_barras: str, id_empresa: UUID) -> Optional[Produto]:
         """
         Obtém um produto pelo código de barras dentro de uma empresa específica.
         
         Args:
-            db: Sessão do banco de dados
             codigo_barras: Código de barras do produto
             id_empresa: ID da empresa
             
         Returns:
             Produto: Produto encontrado ou None
         """
-        return db.query(Produto).filter(
+        query = select(Produto).where(
             Produto.codigo_barras == codigo_barras,
             Produto.id_empresa == id_empresa
-        ).first()
+        )
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_by_categoria(self, db: Session, id_categoria: UUID) -> List[Produto]:
+    async def get_by_categoria(self, id_categoria: UUID) -> List[Produto]:
         """
         Obtém todos os produtos de uma categoria.
         
         Args:
-            db: Sessão do banco de dados
             id_categoria: ID da categoria
             
         Returns:
             List[Produto]: Lista de produtos da categoria
         """
-        return db.query(Produto).filter(Produto.id_categoria == id_categoria).all()
+        query = select(Produto).where(Produto.id_categoria == id_categoria)
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
     
-    def get_multi(
+    async def get_multi(
         self,
-        db: Session,
-        *,
         skip: int = 0,
         limit: int = 100,
         id_empresa: Optional[UUID] = None,
         id_categoria: Optional[UUID] = None,
         ativo: Optional[bool] = None,
         estoque_baixo: Optional[bool] = None,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> List[Produto]:
+        **filters
+    ) -> Tuple[List[Produto], int]:
         """
         Obtém múltiplos produtos com paginação e filtragem opcional.
         
         Args:
-            db: Sessão do banco de dados
             skip: Registros para pular
             limit: Limite de registros
             id_empresa: Filtrar por empresa específica
             id_categoria: Filtrar por categoria específica
             ativo: Filtrar por status (ativo/inativo)
             estoque_baixo: Filtrar produtos com estoque abaixo do mínimo
-            filters: Filtros adicionais
+            **filters: Filtros adicionais
             
         Returns:
-            List[Produto]: Lista de produtos
+            Tuple[List[Produto], int]: Lista de produtos e contagem total
         """
-        query = db.query(Produto)
+        # Consulta para a lista de produtos
+        query = select(Produto)
         
-        # Filtrar por empresa se fornecido
+        # Consulta para contagem total
+        count_query = select(func.count()).select_from(Produto)
+        
+        # Aplicar filtros comuns a ambas consultas
         if id_empresa:
-            query = query.filter(Produto.id_empresa == id_empresa)
+            query = query.where(Produto.id_empresa == id_empresa)
+            count_query = count_query.where(Produto.id_empresa == id_empresa)
         
-        # Filtrar por categoria se fornecido
         if id_categoria:
-            query = query.filter(Produto.id_categoria == id_categoria)
+            query = query.where(Produto.id_categoria == id_categoria)
+            count_query = count_query.where(Produto.id_categoria == id_categoria)
         
-        # Filtrar por status se fornecido
         if ativo is not None:
-            query = query.filter(Produto.ativo == ativo)
+            query = query.where(Produto.ativo == ativo)
+            count_query = count_query.where(Produto.ativo == ativo)
         
-        # Filtrar produtos com estoque abaixo do mínimo
         if estoque_baixo:
-            query = query.filter(Produto.estoque_atual <= Produto.estoque_minimo)
+            query = query.where(Produto.estoque_atual <= Produto.estoque_minimo)
+            count_query = count_query.where(Produto.estoque_atual <= Produto.estoque_minimo)
         
-        if filters:
-            # Tratamento especial para busca por nome
-            if "nome" in filters and filters["nome"]:
-                termo_busca = f"%{filters['nome']}%"
-                query = query.filter(Produto.nome.ilike(termo_busca))
-                del filters["nome"]  # Remove para não processar novamente
-            
-            # Busca por código ou código de barras
-            if "codigo" in filters and filters["codigo"]:
-                termo_busca = f"%{filters['codigo']}%"
-                query = query.filter(
-                    or_(
-                        Produto.codigo.ilike(termo_busca),
-                        Produto.codigo_barras.ilike(termo_busca)
-                    )
-                )
-                del filters["codigo"]  # Remove para não processar novamente
-            
-            # Processamento dos demais filtros
-            for field, value in filters.items():
-                if value and hasattr(Produto, field):
-                    if isinstance(value, str):
-                        query = query.filter(getattr(Produto, field).ilike(f"%{value}%"))
-                    else:
-                        query = query.filter(getattr(Produto, field) == value)
+        # Filtros para busca por nome ou código
+        if "nome" in filters and filters["nome"]:
+            termo_busca = f"%{filters['nome']}%"
+            query = query.where(Produto.nome.ilike(termo_busca))
+            count_query = count_query.where(Produto.nome.ilike(termo_busca))
         
-        # Ordenar por nome
-        query = query.order_by(Produto.nome)
+        if "codigo" in filters and filters["codigo"]:
+            termo_busca = f"%{filters['codigo']}%"
+            query = query.where(or_(
+                Produto.codigo.ilike(termo_busca),
+                Produto.codigo_barras.ilike(termo_busca)
+            ))
+            count_query = count_query.where(or_(
+                Produto.codigo.ilike(termo_busca),
+                Produto.codigo_barras.ilike(termo_busca)
+            ))
         
-        return query.offset(skip).limit(limit).all()
+        # Aplicar ordenação - o padrão é por nome
+        order_by = filters.get("order_by", "nome")
+        order_direction = filters.get("order_direction", "asc")
+        
+        if hasattr(Produto, order_by):
+            column = getattr(Produto, order_by)
+            if order_direction.lower() == "desc":
+                query = query.order_by(desc(column))
+            else:
+                query = query.order_by(asc(column))
+        else:
+            # Ordenação padrão por nome ascendente
+            query = query.order_by(Produto.nome)
+        
+        # Executar consulta de contagem
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar_one() or 0
+        
+        # Aplicar paginação e executar consulta principal
+        query = query.offset(skip).limit(limit)
+        result = await self.session.execute(query)
+        produtos = result.scalars().all()
+        
+        return list(produtos), total
     
-    def get_count(
-        self, 
-        db: Session, 
-        id_empresa: Optional[UUID] = None,
-        id_categoria: Optional[UUID] = None,
-        ativo: Optional[bool] = None,
-        estoque_baixo: Optional[bool] = None,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> int:
-        """
-        Obtém a contagem total de produtos com filtros opcionais.
-        
-        Args:
-            db: Sessão do banco de dados
-            id_empresa: Filtrar por empresa específica
-            id_categoria: Filtrar por categoria específica
-            ativo: Filtrar por status (ativo/inativo)
-            estoque_baixo: Filtrar produtos com estoque abaixo do mínimo
-            filters: Filtros adicionais
-            
-        Returns:
-            int: Contagem de produtos
-        """
-        query = db.query(func.count(Produto.id_produto))
-        
-        # Filtrar por empresa se fornecido
-        if id_empresa:
-            query = query.filter(Produto.id_empresa == id_empresa)
-        
-        # Filtrar por categoria se fornecido
-        if id_categoria:
-            query = query.filter(Produto.id_categoria == id_categoria)
-        
-        # Filtrar por status se fornecido
-        if ativo is not None:
-            query = query.filter(Produto.ativo == ativo)
-        
-        # Filtrar produtos com estoque abaixo do mínimo
-        if estoque_baixo:
-            query = query.filter(Produto.estoque_atual <= Produto.estoque_minimo)
-        
-        if filters:
-            # Tratamento especial para busca por nome
-            if "nome" in filters and filters["nome"]:
-                termo_busca = f"%{filters['nome']}%"
-                query = query.filter(Produto.nome.ilike(termo_busca))
-                del filters["nome"]  # Remove para não processar novamente
-            
-            # Busca por código ou código de barras
-            if "codigo" in filters and filters["codigo"]:
-                termo_busca = f"%{filters['codigo']}%"
-                query = query.filter(
-                    or_(
-                        Produto.codigo.ilike(termo_busca),
-                        Produto.codigo_barras.ilike(termo_busca)
-                    )
-                )
-                del filters["codigo"]  # Remove para não processar novamente
-            
-            # Processamento dos demais filtros
-            for field, value in filters.items():
-                if value and hasattr(Produto, field):
-                    if isinstance(value, str):
-                        query = query.filter(getattr(Produto, field).ilike(f"%{value}%"))
-                    else:
-                        query = query.filter(getattr(Produto, field) == value)
-        
-        return query.scalar()
-    
-    def create(self, db: Session, *, obj_in: ProdutoCreate) -> Produto:
+    async def create(self, data: Dict[str, Any]) -> Produto:
         """
         Cria um novo produto.
         
         Args:
-            db: Sessão do banco de dados
-            obj_in: Dados do produto
+            data: Dados do produto a ser criado
             
         Returns:
             Produto: Produto criado
             
         Raises:
-            HTTPException: Se o código ou código de barras já estiver em uso
+            HTTPException: Se houver erro na criação ou duplicidade
         """
-        # Verificar se o código já existe para esta empresa (se fornecido)
-        if obj_in.codigo:
-            existing = self.get_by_codigo(db, obj_in.codigo, obj_in.id_empresa)
-            if existing:
+        # Verificar duplicação de código dentro da mesma empresa
+        if "codigo" in data and data["codigo"] and "id_empresa" in data:
+            existente = await self.get_by_codigo(data["codigo"], data["id_empresa"])
+            if existente:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Código já cadastrado para outro produto desta empresa"
+                    detail=f"Já existe um produto com código '{data['codigo']}' nesta empresa"
                 )
         
-        # Verificar se o código de barras já existe para esta empresa (se fornecido)
-        if obj_in.codigo_barras:
-            existing = self.get_by_codigo_barras(db, obj_in.codigo_barras, obj_in.id_empresa)
-            if existing:
+        # Verificar duplicação de código de barras dentro da mesma empresa
+        if "codigo_barras" in data and data["codigo_barras"] and "id_empresa" in data:
+            existente = await self.get_by_codigo_barras(data["codigo_barras"], data["id_empresa"])
+            if existente:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Código de barras já cadastrado para outro produto desta empresa"
+                    detail=f"Já existe um produto com código de barras '{data['codigo_barras']}' nesta empresa"
                 )
-        
-        # Criar objeto de dados
-        db_obj = Produto(
-            id_empresa=obj_in.id_empresa,
-            id_categoria=obj_in.id_categoria,
-            nome=obj_in.nome,
-            descricao=obj_in.descricao,
-            codigo=obj_in.codigo,
-            codigo_barras=obj_in.codigo_barras,
-            valor_compra=obj_in.valor_compra,
-            valor_venda=obj_in.valor_venda,
-            estoque_atual=obj_in.estoque_atual,
-            estoque_minimo=obj_in.estoque_minimo,
-            ativo=obj_in.ativo,
-            imagens=obj_in.imagens
-        )
-        
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        
-        return db_obj
+                
+        # Aproveitar a implementação do BaseRepository
+        return await super().create(data, data.get("id_empresa"))
     
-    def update(
-        self,
-        db: Session,
-        *,
-        db_obj: Produto,
-        obj_in: ProdutoUpdate
-    ) -> Produto:
+    async def update(self, id_produto: UUID, data: Dict[str, Any], id_empresa: UUID) -> Optional[Produto]:
         """
         Atualiza um produto existente.
         
         Args:
-            db: Sessão do banco de dados
-            db_obj: Objeto produto existente
-            obj_in: Dados para atualizar
+            id_produto: ID do produto
+            data: Dados para atualização
+            id_empresa: ID da empresa para validação
             
         Returns:
-            Produto: Produto atualizado
+            Produto: Produto atualizado ou None se não encontrado
             
         Raises:
-            HTTPException: Se o código ou código de barras já estiver em uso por outro produto
+            HTTPException: Se houver erro na atualização ou duplicidade
         """
-        # Verificar se o código está sendo alterado e já existe
-        if obj_in.codigo and obj_in.codigo != db_obj.codigo:
-            existing = self.get_by_codigo(db, obj_in.codigo, db_obj.id_empresa)
-            if existing and existing.id_produto != db_obj.id_produto:
+        # Verificar se o produto existe e pertence à empresa
+        produto = await self.get_by_id(id_produto, id_empresa)
+        if not produto:
+            return None
+        
+        # Verificar duplicação de código se estiver sendo modificado
+        if "codigo" in data and data["codigo"] and data["codigo"] != produto.codigo:
+            existente = await self.get_by_codigo(data["codigo"], id_empresa)
+            if existente and existente.id_produto != id_produto:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Código já cadastrado para outro produto desta empresa"
+                    detail=f"Já existe um produto com código '{data['codigo']}' nesta empresa"
                 )
         
-        # Verificar se o código de barras está sendo alterado e já existe
-        if obj_in.codigo_barras and obj_in.codigo_barras != db_obj.codigo_barras:
-            existing = self.get_by_codigo_barras(db, obj_in.codigo_barras, db_obj.id_empresa)
-            if existing and existing.id_produto != db_obj.id_produto:
+        # Verificar duplicação de código de barras se estiver sendo modificado
+        if "codigo_barras" in data and data["codigo_barras"] and data["codigo_barras"] != produto.codigo_barras:
+            existente = await self.get_by_codigo_barras(data["codigo_barras"], id_empresa)
+            if existente and existente.id_produto != id_produto:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Código de barras já cadastrado para outro produto desta empresa"
+                    detail=f"Já existe um produto com código de barras '{data['codigo_barras']}' nesta empresa"
                 )
         
-        # Atualizar os campos
-        if obj_in.nome is not None:
-            db_obj.nome = obj_in.nome
-        if obj_in.descricao is not None:
-            db_obj.descricao = obj_in.descricao
-        if obj_in.codigo is not None:
-            db_obj.codigo = obj_in.codigo
-        if obj_in.codigo_barras is not None:
-            db_obj.codigo_barras = obj_in.codigo_barras
-        if obj_in.valor_compra is not None:
-            db_obj.valor_compra = obj_in.valor_compra
-        if obj_in.valor_venda is not None:
-            db_obj.valor_venda = obj_in.valor_venda
-        if obj_in.estoque_atual is not None:
-            db_obj.estoque_atual = obj_in.estoque_atual
-        if obj_in.estoque_minimo is not None:
-            db_obj.estoque_minimo = obj_in.estoque_minimo
-        if obj_in.ativo is not None:
-            db_obj.ativo = obj_in.ativo
-        if obj_in.imagens is not None:
-            db_obj.imagens = obj_in.imagens
-        if obj_in.id_categoria is not None:
-            db_obj.id_categoria = obj_in.id_categoria
+        # Preparar os dados para atualização
+        data_copy = data.copy()
+        data_copy.pop("id_empresa", None)  # Remover id_empresa se existir
         
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
+        # Construir a consulta de atualização
+        stmt = (
+            select(Produto)
+            .where(Produto.id_produto == id_produto)
+            .where(Produto.id_empresa == id_empresa)
+        )
         
-        return db_obj
+        result = await self.session.execute(stmt)
+        produto = result.scalar_one_or_none()
+        
+        if not produto:
+            return None
+            
+        # Atualizar os atributos do produto
+        for key, value in data_copy.items():
+            if hasattr(produto, key):
+                setattr(produto, key, value)
+        
+        # Salvar as alterações
+        self.session.add(produto)
+        await self.session.commit()
+        await self.session.refresh(produto)
+        
+        return produto
     
-    def atualizar_estoque(
-        self,
-        db: Session,
-        *,
-        id_produto: UUID,
-        quantidade: float,
-        is_entrada: bool = True
-    ) -> Produto:
+    async def update_estoque(self, id_produto: UUID, id_empresa: UUID, quantidade: Decimal, is_entrada: bool = True) -> Optional[Produto]:
         """
         Atualiza o estoque de um produto.
         
         Args:
-            db: Sessão do banco de dados
             id_produto: ID do produto
-            quantidade: Quantidade a ser ajustada
+            id_empresa: ID da empresa para validação
+            quantidade: Quantidade a ajustar (positivo)
             is_entrada: Se True, adiciona ao estoque; se False, subtrai
             
         Returns:
-            Produto: Produto atualizado
+            Produto: Produto com estoque atualizado ou None se não encontrado
             
         Raises:
-            HTTPException: Se o produto não for encontrado
+            HTTPException: Se houver erro na atualização
         """
-        produto = self.get(db, id=id_produto)
-        
+        # Verificar se o produto existe e pertence à empresa
+        produto = await self.get_by_id(id_produto, id_empresa)
         if not produto:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Produto não encontrado"
-            )
-        
-        # Atualizar estoque
-        if is_entrada:
-            produto.estoque_atual += quantidade
-        else:
-            if produto.estoque_atual < quantidade:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Estoque insuficiente para operação"
-                )
-            produto.estoque_atual -= quantidade
-        
-        db.add(produto)
-        db.commit()
-        db.refresh(produto)
-        
-        return produto
-
-    @staticmethod
-    def get_all(
-        db: Session, 
-        id_empresa: UUID, 
-        skip: int = 0, 
-        limit: int = 100,
-        nome: Optional[str] = None,
-        codigo: Optional[str] = None,
-        categoria: Optional[str] = None,
-        ativo: Optional[bool] = None,
-        order_by: str = "nome",
-        order_direction: str = "asc"
-    ) -> ProdutosPaginados:
-        """
-        Retorna todos os produtos com filtros e paginação
-        """
-        # Consulta base
-        query = db.query(Produto).filter(Produto.id_empresa == id_empresa)
-        
-        # Aplicar filtros
-        if nome:
-            query = query.filter(Produto.nome.ilike(f"%{nome}%"))
-        if codigo:
-            query = query.filter(Produto.codigo.ilike(f"%{codigo}%"))
-        if categoria:
-            query = query.filter(Produto.categoria.ilike(f"%{categoria}%"))
-        if ativo is not None:
-            query = query.filter(Produto.ativo == ativo)
-        
-        # Calcular total para paginação
-        total = query.count()
-        
-        # Aplicar ordenação
-        order_column = getattr(Produto, order_by, Produto.nome)
-        if order_direction.lower() == "desc":
-            query = query.order_by(desc(order_column))
-        else:
-            query = query.order_by(asc(order_column))
-        
-        # Aplicar paginação
-        query = query.offset(skip).limit(limit)
-        
-        # Calcular páginas
-        pages = (total + limit - 1) // limit if limit > 0 else 1
-        page = (skip // limit) + 1 if limit > 0 else 1
-        
-        # Retornar resultados paginados
-        return ProdutosPaginados(
-            items=query.all(),
-            total=total,
-            page=page,
-            size=limit,
-            pages=pages
-            )
-
-    @staticmethod
-    def update_estoque(db: Session, id_produto: UUID, id_empresa: UUID, quantidade: Decimal) -> Optional[Produto]:
-        """
-        Atualiza o estoque de um produto
-        """
-        # Obter produto existente
-        db_produto = ProdutoRepository.get_by_id(db, id_produto, id_empresa)
-        
-        if not db_produto:
-            logger.warning(
-                f"Tentativa de atualizar estoque de produto inexistente: {id_produto}",
-                extra={"id_empresa": str(id_empresa)}
-            )
             return None
         
         # Calcular novo estoque
-        novo_estoque = db_produto.estoque_atual + quantidade
+        novo_estoque = produto.estoque_atual
+        if is_entrada:
+            novo_estoque += float(quantidade)
+        else:
+            novo_estoque -= float(quantidade)
+            if novo_estoque < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Estoque não pode ficar negativo"
+                )
         
-        # Validar se estoque ficará negativo
-        if novo_estoque < 0:
-            logger.warning(
-                f"Tentativa de ajustar estoque para valor negativo: {novo_estoque}",
-                extra={"id_empresa": str(id_empresa), "id_produto": str(id_produto)}
-            )
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Estoque não pode ficar negativo"
-            )
+        # Atualizar o estoque
+        produto.estoque_atual = novo_estoque
         
-        # Atualizar estoque
-        db_produto.estoque_atual = novo_estoque
+        # Salvar as alterações
+        self.session.add(produto)
+        await self.session.commit()
+        await self.session.refresh(produto)
         
-        try:
-            db.add(db_produto)
-            db.commit()
-            db.refresh(db_produto)
-            logger.info(
-                f"Estoque atualizado com sucesso para {db_produto.estoque_atual}",
-                extra={
-                    "id_empresa": str(id_empresa), 
-                    "id_produto": str(id_produto),
-                    "alteracao": float(quantidade)
-                }
-            )
-            return db_produto
-        except Exception as e:
-            db.rollback()
-            logger.error(
-                f"Erro ao atualizar estoque: {str(e)}",
-                extra={"id_empresa": str(id_empresa), "id_produto": str(id_produto)}
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro ao atualizar estoque"
-            )
-
-    @staticmethod
-    def delete(db: Session, id_produto: UUID, id_empresa: UUID) -> bool:
+        return produto
+    
+    async def delete(self, id_produto: UUID, id_empresa: UUID) -> bool:
         """
-        Exclui um produto
-        """
-        # Obter produto existente
-        db_produto = ProdutoRepository.get_by_id(db, id_produto, id_empresa)
+        Remove um produto.
         
-        if not db_produto:
-            logger.warning(
-                f"Tentativa de excluir produto inexistente: {id_produto}",
-                extra={"id_empresa": str(id_empresa)}
-            )
+        Args:
+            id_produto: ID do produto
+            id_empresa: ID da empresa para validação
+            
+        Returns:
+            bool: True se removido com sucesso
+            
+        Raises:
+            HTTPException: Se o produto não existir ou não pertencer à empresa
+        """
+        # Verificar se o produto existe e pertence à empresa
+        produto = await self.get_by_id(id_produto, id_empresa)
+        if not produto:
             return False
         
-        try:
-            db.delete(db_produto)
-            db.commit()
-            logger.info(
-                f"Produto excluído com sucesso: {db_produto.nome} ({db_produto.codigo})",
-                extra={"id_empresa": str(id_empresa), "id_produto": str(id_produto)}
-            )
-            return True
-        except Exception as e:
-            db.rollback()
-            logger.error(
-                f"Erro ao excluir produto: {str(e)}",
-                extra={"id_empresa": str(id_empresa), "id_produto": str(id_produto)}
-            )
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Erro ao excluir produto"
-            ) 
+        # Remover o produto
+        await self.session.delete(produto)
+        await self.session.commit()
+        
+        return True 

@@ -1,257 +1,379 @@
-"""Router para operações com contas bancárias."""
-from typing import List, Dict, Any, Optional
+"""
+Router para gerenciamento de contas bancárias no sistema CCONTROL-M.
+
+Este módulo implementa os endpoints para criar, listar, atualizar, remover e 
+gerenciar contas bancárias, com suporte a multi-tenancy e controle de permissões.
+"""
+
+import logging
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Body
 from uuid import UUID
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from typing import Optional, Dict, Any, List
+from sqlalchemy.ext.asyncio import AsyncSession
+from decimal import Decimal
 
-from app.core.database import get_db
-from app.core.security import get_current_usuario
-from app.models.usuario import Usuario
 from app.schemas.conta_bancaria import (
-    ContaBancaria, 
-    ContaBancariaCreate, 
-    ContaBancariaUpdate, 
-    ContaBancariaList,
-    AtualizacaoSaldo
+    ContaBancaria, ContaBancariaCreate, ContaBancariaUpdate, 
+    ContaBancariaList, ContaBancariaAtualizacaoSaldo
 )
-from app.repositories.conta_bancaria_repository import ContaBancariaRepository
+from app.services.conta_bancaria_service import ContaBancariaService
+from app.services.log_sistema_service import LogSistemaService
+from app.schemas.token import TokenPayload
+from app.models.usuario import Usuario
+from app.dependencies import get_current_user
+from app.database import get_async_session
+from app.utils.permissions import verify_permission
+from app.schemas.log_sistema import LogSistemaCreate
 
+# Configuração de logger
+logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/contas-bancarias",
     tags=["Contas Bancárias"],
-    dependencies=[Depends(get_current_usuario)]
+    responses={404: {"description": "Conta bancária não encontrada"}},
 )
 
-conta_bancaria_repository = ContaBancariaRepository()
+
+@router.get("", response_model=ContaBancariaList)
+async def listar_contas_bancarias(
+    id_empresa: UUID,
+    skip: int = Query(0, ge=0, description="Registros para pular (paginação)"),
+    limit: int = Query(100, ge=1, le=100, description="Limite de registros por página"),
+    nome: Optional[str] = Query(None, description="Filtrar por nome da conta"),
+    tipo: Optional[str] = Query(None, description="Filtrar por tipo da conta"),
+    banco: Optional[str] = Query(None, description="Filtrar por banco"),
+    ativa: Optional[bool] = Query(None, description="Filtrar por status (ativa/inativa)"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """
+    Lista contas bancárias com paginação e filtros opcionais.
+    
+    - **id_empresa**: ID da empresa (obrigatório)
+    - **skip**: Quantos registros pular (para paginação)
+    - **limit**: Limite de registros por página
+    - **nome**: Filtro opcional por nome da conta
+    - **tipo**: Filtro opcional por tipo de conta
+    - **banco**: Filtro opcional por banco
+    - **ativa**: Filtro opcional por status (ativa/inativa)
+    
+    Retorna lista paginada de contas bancárias que correspondem aos filtros aplicados.
+    """
+    # Verificar permissão
+    verify_permission(current_user, "contas_bancarias:listar", id_empresa)
+    
+    # Inicializar serviço e buscar contas bancárias
+    conta_bancaria_service = ContaBancariaService()
+    
+    # Construir filtros
+    filtros = {}
+    if nome:
+        filtros["nome"] = nome
+    if tipo:
+        filtros["tipo"] = tipo
+    if banco:
+        filtros["banco"] = banco
+    if ativa is not None:
+        filtros["ativa"] = ativa
+    
+    contas, total = await conta_bancaria_service.listar_contas_bancarias(
+        id_empresa=id_empresa,
+        skip=skip,
+        limit=limit,
+        filtros=filtros
+    )
+    
+    # Calcular página atual
+    page = (skip // limit) + 1 if limit > 0 else 1
+    
+    # Retornar resposta paginada
+    return ContaBancariaList(
+        items=contas,
+        total=total,
+        page=page,
+        size=limit
+    )
 
 
-@router.post("/", response_model=ContaBancaria, status_code=status.HTTP_201_CREATED)
-def criar_conta_bancaria(
-    *,
-    db: Session = Depends(get_db),
-    conta_in: ContaBancariaCreate,
-    usuario_atual: Usuario = Depends(get_current_usuario)
+@router.get("/{id_conta}", response_model=ContaBancaria)
+async def obter_conta_bancaria(
+    id_conta: UUID = Path(..., description="ID da conta bancária"),
+    id_empresa: UUID = Query(..., description="ID da empresa"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """
+    Busca uma conta bancária específica pelo ID.
+    
+    - **id_conta**: ID da conta bancária
+    - **id_empresa**: ID da empresa para validação
+    
+    Retorna os dados detalhados da conta bancária.
+    """
+    # Verificar permissão
+    verify_permission(current_user, "contas_bancarias:visualizar", id_empresa)
+    
+    # Inicializar serviço e buscar conta bancária
+    conta_bancaria_service = ContaBancariaService()
+    conta_bancaria = await conta_bancaria_service.get_conta_bancaria(id_conta, id_empresa)
+    
+    return conta_bancaria
+
+
+@router.post("", response_model=ContaBancaria, status_code=status.HTTP_201_CREATED)
+async def criar_conta_bancaria(
+    conta_bancaria: ContaBancariaCreate,
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
     Cria uma nova conta bancária.
     
-    - **nome**: Nome da conta bancária
-    - **banco**: Nome do banco (opcional)
-    - **agencia**: Número da agência (opcional)
-    - **numero**: Número da conta (opcional)
-    - **tipo**: Tipo da conta (corrente, poupança, carteira, investimento, outro)
-    - **saldo_inicial**: Saldo inicial da conta
-    - **ativa**: Se a conta está ativa (padrão: True)
-    - **mostrar_dashboard**: Se a conta deve ser exibida no dashboard (padrão: True)
-    """
-    return conta_bancaria_repository.create(db=db, obj_in=conta_in)
-
-
-@router.get("/", response_model=Dict[str, Any])
-def listar_contas_bancarias(
-    *,
-    db: Session = Depends(get_db),
-    usuario_atual: Usuario = Depends(get_current_usuario),
-    id_empresa: UUID,
-    skip: int = 0,
-    limit: int = 100,
-    ativa: Optional[bool] = None,
-    mostrar_dashboard: Optional[bool] = None,
-    tipo: Optional[str] = None,
-    nome: Optional[str] = None,
-    banco: Optional[str] = None
-):
-    """
-    Lista contas bancárias com filtros opcionais.
+    - **conta_bancaria**: Dados da conta bancária a ser criada
     
-    - **id_empresa**: ID da empresa (obrigatório)
-    - **skip**: Registros para pular (paginação)
-    - **limit**: Limite de registros (paginação)
-    - **ativa**: Filtrar por status (ativa/inativa)
-    - **mostrar_dashboard**: Filtrar por exibição no dashboard
-    - **tipo**: Filtrar por tipo de conta
-    - **nome**: Filtrar por nome
-    - **banco**: Filtrar por banco
+    Retorna os dados da conta bancária criada.
     """
-    # Construir filtros
-    filters = {}
-    if nome:
-        filters["nome"] = nome
-    if banco:
-        filters["banco"] = banco
+    # Verificar permissão
+    verify_permission(current_user, "contas_bancarias:criar", conta_bancaria.id_empresa)
     
-    # Buscar registros
-    contas = conta_bancaria_repository.get_multi(
-        db=db,
-        skip=skip,
-        limit=limit,
-        id_empresa=id_empresa,
-        ativa=ativa,
-        mostrar_dashboard=mostrar_dashboard,
-        tipo=tipo,
-        filters=filters
-    )
+    # Inicializar serviços
+    conta_bancaria_service = ContaBancariaService()
+    log_service = LogSistemaService()
     
-    # Obter contagem total para paginação
-    total = conta_bancaria_repository.get_count(
-        db=db,
-        id_empresa=id_empresa,
-        ativa=ativa,
-        mostrar_dashboard=mostrar_dashboard,
-        tipo=tipo,
-        filters=filters
-    )
+    # Criar conta bancária
+    nova_conta = await conta_bancaria_service.criar_conta_bancaria(conta_bancaria)
     
-    return {
-        "data": contas,
-        "total": total,
-        "skip": skip,
-        "limit": limit
-    }
-
-
-@router.get("/todas", response_model=List[ContaBancariaList])
-def listar_todas_contas_bancarias(
-    *,
-    db: Session = Depends(get_db),
-    usuario_atual: Usuario = Depends(get_current_usuario),
-    id_empresa: UUID,
-    ativa: Optional[bool] = True
-):
-    """
-    Lista todas as contas bancárias de uma empresa sem paginação.
-    
-    - **id_empresa**: ID da empresa (obrigatório)
-    - **ativa**: Filtrar por status (ativa/inativa, padrão: True)
-    """
-    return conta_bancaria_repository.get_by_empresa(db=db, id_empresa=id_empresa, ativa=ativa)
-
-
-@router.get("/dashboard", response_model=Dict[str, Any])
-def obter_dashboard_contas(
-    *,
-    db: Session = Depends(get_db),
-    usuario_atual: Usuario = Depends(get_current_usuario),
-    id_empresa: UUID
-):
-    """
-    Obtém dados do dashboard de contas bancárias.
-    
-    - **id_empresa**: ID da empresa (obrigatório)
-    """
-    return conta_bancaria_repository.get_dashboard_contas(db=db, id_empresa=id_empresa)
-
-
-@router.get("/{id_conta}", response_model=ContaBancaria)
-def obter_conta_bancaria(
-    *,
-    db: Session = Depends(get_db),
-    id_conta: UUID,
-    usuario_atual: Usuario = Depends(get_current_usuario)
-):
-    """
-    Obtém uma conta bancária pelo ID.
-    
-    - **id_conta**: ID da conta bancária
-    """
-    conta = conta_bancaria_repository.get(db=db, id=id_conta)
-    if not conta:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conta bancária não encontrada"
+    # Registrar log
+    await log_service.registrar_log(
+        LogSistemaCreate(
+            id_usuario=current_user.sub,
+            id_empresa=conta_bancaria.id_empresa,
+            acao="conta_bancaria:criacao",
+            descricao=f"Conta Bancária {nova_conta.nome} (ID: {nova_conta.id_conta}) criada"
         )
-    return conta
+    )
+    
+    return nova_conta
 
 
 @router.put("/{id_conta}", response_model=ContaBancaria)
-def atualizar_conta_bancaria(
-    *,
-    db: Session = Depends(get_db),
+async def atualizar_conta_bancaria(
     id_conta: UUID,
-    conta_in: ContaBancariaUpdate,
-    usuario_atual: Usuario = Depends(get_current_usuario)
+    conta_bancaria: ContaBancariaUpdate,
+    id_empresa: UUID = Query(..., description="ID da empresa"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Atualiza uma conta bancária existente.
+    Atualiza dados de uma conta bancária existente.
     
     - **id_conta**: ID da conta bancária
-    - **nome**: Nome da conta bancária
-    - **banco**: Nome do banco
-    - **agencia**: Número da agência
-    - **numero**: Número da conta
-    - **tipo**: Tipo da conta (corrente, poupança, carteira, investimento, outro)
-    - **saldo_inicial**: Saldo inicial da conta
-    - **ativa**: Se a conta está ativa
-    - **mostrar_dashboard**: Se a conta deve ser exibida no dashboard
+    - **conta_bancaria**: Dados para atualização
+    - **id_empresa**: ID da empresa para validação
+    
+    Retorna os dados atualizados da conta bancária.
     """
-    conta = conta_bancaria_repository.get(db=db, id=id_conta)
-    if not conta:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Conta bancária não encontrada"
+    # Verificar permissão
+    verify_permission(current_user, "contas_bancarias:editar", id_empresa)
+    
+    # Inicializar serviços
+    conta_bancaria_service = ContaBancariaService()
+    log_service = LogSistemaService()
+    
+    # Buscar conta atual para o log
+    conta_atual = await conta_bancaria_service.get_conta_bancaria(id_conta, id_empresa)
+    
+    # Atualizar conta bancária
+    conta_atualizada = await conta_bancaria_service.atualizar_conta_bancaria(
+        id_conta, 
+        conta_bancaria, 
+        id_empresa
+    )
+    
+    # Registrar log
+    await log_service.registrar_log(
+        LogSistemaCreate(
+            id_usuario=current_user.sub,
+            id_empresa=id_empresa,
+            acao="conta_bancaria:atualizacao",
+            descricao=f"Conta Bancária {conta_atual.nome} (ID: {id_conta}) atualizada"
         )
-    return conta_bancaria_repository.update(db=db, db_obj=conta, obj_in=conta_in)
+    )
+    
+    return conta_atualizada
 
 
-@router.delete("/{id_conta}", response_model=ContaBancaria)
-def excluir_conta_bancaria(
-    *,
-    db: Session = Depends(get_db),
+@router.delete("/{id_conta}", status_code=status.HTTP_200_OK)
+async def remover_conta_bancaria(
     id_conta: UUID,
-    usuario_atual: Usuario = Depends(get_current_usuario)
+    id_empresa: UUID = Query(..., description="ID da empresa"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Exclui uma conta bancária.
+    Remove uma conta bancária.
     
     - **id_conta**: ID da conta bancária
+    - **id_empresa**: ID da empresa para validação
+    
+    Retorna mensagem de confirmação.
     """
-    return conta_bancaria_repository.remove(db=db, id=id_conta)
+    # Verificar permissão
+    verify_permission(current_user, "contas_bancarias:excluir", id_empresa)
+    
+    # Inicializar serviços
+    conta_bancaria_service = ContaBancariaService()
+    log_service = LogSistemaService()
+    
+    # Buscar conta para o log antes de remover
+    conta = await conta_bancaria_service.get_conta_bancaria(id_conta, id_empresa)
+    
+    # Remover conta bancária
+    resultado = await conta_bancaria_service.remover_conta_bancaria(id_conta, id_empresa)
+    
+    # Registrar log
+    await log_service.registrar_log(
+        LogSistemaCreate(
+            id_usuario=current_user.sub,
+            id_empresa=id_empresa,
+            acao="conta_bancaria:exclusao",
+            descricao=f"Conta Bancária {conta.nome} (ID: {id_conta}) removida"
+        )
+    )
+    
+    return resultado
 
 
-@router.post("/{id_conta}/toggle-ativa", response_model=ContaBancaria)
-def alternar_status_conta_bancaria(
-    *,
-    db: Session = Depends(get_db),
+@router.patch("/{id_conta}/toggle", response_model=ContaBancaria)
+async def alternar_status_conta(
     id_conta: UUID,
-    usuario_atual: Usuario = Depends(get_current_usuario)
+    id_empresa: UUID = Query(..., description="ID da empresa"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Alterna o status de ativação da conta bancária.
+    Alterna o status ativo/inativo de uma conta bancária.
     
     - **id_conta**: ID da conta bancária
+    - **id_empresa**: ID da empresa para validação
+    
+    Retorna os dados atualizados da conta bancária.
     """
-    return conta_bancaria_repository.toggle_ativa(db=db, id=id_conta)
+    # Verificar permissão
+    verify_permission(current_user, "contas_bancarias:editar", id_empresa)
+    
+    # Inicializar serviços
+    conta_bancaria_service = ContaBancariaService()
+    log_service = LogSistemaService()
+    
+    # Alternar status da conta
+    conta_atualizada = await conta_bancaria_service.alternar_status_conta(id_conta, id_empresa)
+    
+    # Definir status para o log
+    status_descricao = "ativada" if conta_atualizada.ativa else "desativada"
+    
+    # Registrar log
+    await log_service.registrar_log(
+        LogSistemaCreate(
+            id_usuario=current_user.sub,
+            id_empresa=id_empresa,
+            acao="conta_bancaria:alternar_status",
+            descricao=f"Conta Bancária {conta_atualizada.nome} (ID: {id_conta}) {status_descricao}"
+        )
+    )
+    
+    return conta_atualizada
 
 
-@router.post("/{id_conta}/toggle-dashboard", response_model=ContaBancaria)
-def alternar_exibicao_dashboard(
-    *,
-    db: Session = Depends(get_db),
+@router.patch("/{id_conta}/dashboard", response_model=ContaBancaria)
+async def alternar_visibilidade_dashboard(
     id_conta: UUID,
-    usuario_atual: Usuario = Depends(get_current_usuario)
+    id_empresa: UUID = Query(..., description="ID da empresa"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Alterna a exibição da conta no dashboard.
+    Alterna a visibilidade no dashboard para uma conta bancária.
     
     - **id_conta**: ID da conta bancária
+    - **id_empresa**: ID da empresa para validação
+    
+    Retorna os dados atualizados da conta bancária.
     """
-    return conta_bancaria_repository.toggle_dashboard(db=db, id=id_conta)
+    # Verificar permissão
+    verify_permission(current_user, "contas_bancarias:editar", id_empresa)
+    
+    # Inicializar serviços
+    conta_bancaria_service = ContaBancariaService()
+    log_service = LogSistemaService()
+    
+    # Alternar visibilidade no dashboard
+    conta_atualizada = await conta_bancaria_service.alternar_visibilidade_dashboard(id_conta, id_empresa)
+    
+    # Definir status para o log
+    visibilidade = "visível" if conta_atualizada.mostrar_dashboard else "oculta"
+    
+    # Registrar log
+    await log_service.registrar_log(
+        LogSistemaCreate(
+            id_usuario=current_user.sub,
+            id_empresa=id_empresa,
+            acao="conta_bancaria:alternar_dashboard",
+            descricao=f"Conta Bancária {conta_atualizada.nome} (ID: {id_conta}) agora está {visibilidade} no dashboard"
+        )
+    )
+    
+    return conta_atualizada
 
 
-@router.post("/{id_conta}/atualizar-saldo", response_model=ContaBancaria)
-def atualizar_saldo_conta(
-    *,
-    db: Session = Depends(get_db),
+@router.patch("/{id_conta}/saldo", response_model=ContaBancaria)
+async def atualizar_saldo_manual(
     id_conta: UUID,
-    operacao: AtualizacaoSaldo,
-    usuario_atual: Usuario = Depends(get_current_usuario)
+    dados_saldo: ContaBancariaAtualizacaoSaldo = Body(...),
+    id_empresa: UUID = Query(..., description="ID da empresa"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Atualiza o saldo de uma conta bancária.
+    Atualiza manualmente o saldo de uma conta bancária.
     
     - **id_conta**: ID da conta bancária
-    - **tipo_operacao**: Tipo de operação (credito, debito, ajuste)
-    - **valor**: Valor da operação
+    - **dados_saldo**: Dados para atualização do saldo
+    - **id_empresa**: ID da empresa para validação
+    
+    Retorna os dados atualizados da conta bancária.
     """
-    return conta_bancaria_repository.atualizar_saldo(db=db, id=id_conta, operacao=operacao) 
+    # Verificar permissão
+    verify_permission(current_user, "contas_bancarias:editar_saldo", id_empresa)
+    
+    # Inicializar serviços
+    conta_bancaria_service = ContaBancariaService()
+    log_service = LogSistemaService()
+    
+    # Buscar conta atual para o log
+    conta_atual = await conta_bancaria_service.get_conta_bancaria(id_conta, id_empresa)
+    
+    # Atualizar saldo da conta
+    conta_atualizada = await conta_bancaria_service.atualizar_saldo_manual(
+        id_conta, 
+        dados_saldo.saldo,
+        dados_saldo.justificativa,
+        id_empresa
+    )
+    
+    # Registrar log
+    await log_service.registrar_log(
+        LogSistemaCreate(
+            id_usuario=current_user.sub,
+            id_empresa=id_empresa,
+            acao="conta_bancaria:atualizacao_saldo",
+            descricao=(
+                f"Saldo da Conta Bancária {conta_atual.nome} (ID: {id_conta}) "
+                f"atualizado de {conta_atual.saldo_atual} para {conta_atualizada.saldo_atual}. "
+                f"Justificativa: {dados_saldo.justificativa}"
+            )
+        )
+    )
+    
+    return conta_atualizada 

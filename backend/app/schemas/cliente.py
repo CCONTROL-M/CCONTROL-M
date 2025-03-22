@@ -1,9 +1,10 @@
 """Schema para validação e serialização de clientes no sistema CCONTROL-M."""
 from uuid import UUID
 from typing import Optional, List
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 from .pagination import PaginatedResponse
+from .validators import validar_cpf_cnpj
 
 
 class ClienteBase(BaseModel):
@@ -13,6 +14,11 @@ class ClienteBase(BaseModel):
     contato: Optional[str] = None
     telefone: Optional[str] = None
     email: Optional[str] = None
+    
+    @field_validator('cpf_cnpj')
+    def validar_documento(cls, v):
+        """Valida e formata o CPF ou CNPJ."""
+        return validar_cpf_cnpj(v)
 
 
 class ClienteCreate(ClienteBase):
@@ -28,6 +34,13 @@ class ClienteUpdate(BaseModel):
     telefone: Optional[str] = None
     email: Optional[str] = None
     ativo: Optional[bool] = None
+    
+    @field_validator('cpf_cnpj')
+    def validar_documento(cls, v):
+        """Valida e formata o CPF ou CNPJ."""
+        if v is not None:
+            return validar_cpf_cnpj(v)
+        return v
 
 
 class ClienteInDB(ClienteBase):

@@ -1,6 +1,6 @@
 """Modelo de Usuário para o sistema CCONTROL-M."""
 import uuid
-from typing import Optional
+from typing import Optional, List
 from sqlalchemy import String, Text, ForeignKey, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -34,6 +34,7 @@ class Usuario(Base, TimestampedModel):
     # Relacionamentos
     empresa = relationship("Empresa", back_populates="usuarios")
     logs = relationship("LogSistema", back_populates="usuario")
+    permissoes = relationship("PermissaoUsuario", back_populates="usuario", cascade="all, delete-orphan")
     
     def __repr__(self) -> str:
         """Representação em string do usuário."""

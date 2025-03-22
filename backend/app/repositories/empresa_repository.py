@@ -1,94 +1,100 @@
 """Repositório para operações com empresas."""
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
-from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func, or_
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException, status
 
 from app.models.empresa import Empresa
 from app.schemas.empresa import EmpresaCreate, EmpresaUpdate
-from app.repositories.base_repository import BaseRepository
 
 
-class EmpresaRepository(BaseRepository[Empresa, EmpresaCreate, EmpresaUpdate]):
+class EmpresaRepository:
     """Repositório para operações com empresas."""
     
-    def __init__(self):
-        """Inicializa o repositório com o modelo Empresa."""
-        super().__init__(Empresa)
+    def __init__(self, session: AsyncSession):
+        """
+        Inicializa o repositório com a sessão do banco de dados.
+        
+        Args:
+            session: Sessão assíncrona do banco de dados
+        """
+        self.session = session
     
-    def get(self, db: Session, id: UUID) -> Optional[Empresa]:
+    async def get_by_id(self, id_empresa: UUID) -> Optional[Empresa]:
         """
         Obtém uma empresa pelo ID.
         
         Args:
-            db: Sessão do banco de dados
-            id: ID da empresa
+            id_empresa: ID da empresa
             
         Returns:
             Empresa: Empresa encontrada ou None
         """
-        return db.query(Empresa).filter(Empresa.id_empresa == id).first()
+        query = select(Empresa).where(Empresa.id_empresa == id_empresa)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_by_cnpj(self, db: Session, cnpj: str) -> Optional[Empresa]:
+    async def get_by_cnpj(self, cnpj: str) -> Optional[Empresa]:
         """
         Obtém uma empresa pelo CNPJ.
         
         Args:
-            db: Sessão do banco de dados
             cnpj: CNPJ da empresa
             
         Returns:
             Empresa: Empresa encontrada ou None
         """
-        return db.query(Empresa).filter(Empresa.cnpj == cnpj).first()
+        query = select(Empresa).where(Empresa.cnpj == cnpj)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_by_field(self, db: Session, field_name: str, value: Any) -> Optional[Empresa]:
+    async def get_by_field(self, field_name: str, value: Any) -> Optional[Empresa]:
         """
         Obtém uma empresa pelo valor de um campo específico.
         
         Args:
-            db: Sessão do banco de dados
             field_name: Nome do campo
             value: Valor do campo
             
         Returns:
             Empresa: Empresa encontrada ou None
         """
-        return db.query(Empresa).filter(getattr(Empresa, field_name) == value).first()
+        query = select(Empresa).where(getattr(Empresa, field_name) == value)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_multi(
+    async def get_multi(
         self,
-        db: Session,
-        *,
         skip: int = 0,
         limit: int = 100,
         filters: Optional[Dict[str, Any]] = None
-    ) -> List[Empresa]:
+    ) -> Tuple[List[Empresa], int]:
         """
         Obtém múltiplas empresas com paginação e filtragem opcional.
         
         Args:
-            db: Sessão do banco de dados
             skip: Registros para pular
             limit: Limite de registros
             filters: Filtros adicionais (nome, cidade, etc)
             
         Returns:
-            List[Empresa]: Lista de empresas
+            Tuple[List[Empresa], int]: Lista de empresas e contagem total
         """
-        query = db.query(Empresa)
+        query = select(Empresa)
+        count_query = select(func.count()).select_from(Empresa)
         
         if filters:
             # Tratamento especial para busca por nome (razão social ou fantasia)
             if "nome" in filters and filters["nome"]:
                 termo_busca = f"%{filters['nome']}%"
-                query = query.filter(
-                    or_(
-                        Empresa.razao_social.ilike(termo_busca),
-                        Empresa.nome_fantasia.ilike(termo_busca)
-                    )
+                nome_filter = or_(
+                    Empresa.razao_social.ilike(termo_busca),
+                    Empresa.nome_fantasia.ilike(termo_busca)
                 )
+                query = query.where(nome_filter)
+                count_query = count_query.where(nome_filter)
                 del filters["nome"]  # Remove para não processar novamente
             
             # Processamento dos demais filtros
@@ -96,33 +102,45 @@ class EmpresaRepository(BaseRepository[Empresa, EmpresaCreate, EmpresaUpdate]):
                 if value and hasattr(Empresa, field):
                     if field in ["razao_social", "nome_fantasia", "cidade", "estado"]:
                         # Busca por substring para campos de texto
-                        query = query.filter(getattr(Empresa, field).ilike(f"%{value}%"))
+                        field_filter = getattr(Empresa, field).ilike(f"%{value}%")
                     else:
-                        query = query.filter(getattr(Empresa, field) == value)
+                        field_filter = getattr(Empresa, field) == value
+                    
+                    query = query.where(field_filter)
+                    count_query = count_query.where(field_filter)
         
         # Ordenar por razão social
         query = query.order_by(Empresa.razao_social)
         
-        return query.offset(skip).limit(limit).all()
+        # Aplicar paginação
+        query = query.offset(skip).limit(limit)
+        
+        # Executar as queries
+        result = await self.session.execute(query)
+        items = list(result.scalars().all())
+        
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar_one()
+        
+        return items, total
     
-    def get_count(self, db: Session, filters: Optional[Dict[str, Any]] = None) -> int:
+    async def get_count(self, filters: Optional[Dict[str, Any]] = None) -> int:
         """
         Obtém a contagem total de empresas com filtros opcionais.
         
         Args:
-            db: Sessão do banco de dados
             filters: Filtros adicionais
             
         Returns:
             int: Contagem de empresas
         """
-        query = db.query(Empresa)
+        query = select(func.count()).select_from(Empresa)
         
         if filters:
             # Tratamento especial para busca por nome (razão social ou fantasia)
             if "nome" in filters and filters["nome"]:
                 termo_busca = f"%{filters['nome']}%"
-                query = query.filter(
+                query = query.where(
                     or_(
                         Empresa.razao_social.ilike(termo_busca),
                         Empresa.nome_fantasia.ilike(termo_busca)
@@ -135,18 +153,18 @@ class EmpresaRepository(BaseRepository[Empresa, EmpresaCreate, EmpresaUpdate]):
                 if value and hasattr(Empresa, field):
                     if field in ["razao_social", "nome_fantasia", "cidade", "estado"]:
                         # Busca por substring para campos de texto
-                        query = query.filter(getattr(Empresa, field).ilike(f"%{value}%"))
+                        query = query.where(getattr(Empresa, field).ilike(f"%{value}%"))
                     else:
-                        query = query.filter(getattr(Empresa, field) == value)
+                        query = query.where(getattr(Empresa, field) == value)
         
-        return query.count()
+        result = await self.session.execute(query)
+        return result.scalar_one()
     
-    def create(self, db: Session, *, obj_in: EmpresaCreate) -> Empresa:
+    async def create(self, obj_in: EmpresaCreate) -> Empresa:
         """
         Cria uma nova empresa.
         
         Args:
-            db: Sessão do banco de dados
             obj_in: Dados da empresa
             
         Returns:
@@ -155,45 +173,50 @@ class EmpresaRepository(BaseRepository[Empresa, EmpresaCreate, EmpresaUpdate]):
         Raises:
             HTTPException: Se o CNPJ já estiver em uso
         """
-        # Verificar se o CNPJ já existe
-        if self.get_by_cnpj(db, obj_in.cnpj):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="CNPJ já está em uso por outra empresa"
+        try:
+            # Verificar se o CNPJ já existe
+            existing_empresa = await self.get_by_cnpj(obj_in.cnpj)
+            if existing_empresa:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="CNPJ já está em uso por outra empresa"
+                )
+            
+            # Criar objeto de dados
+            db_obj = Empresa(
+                razao_social=obj_in.razao_social,
+                nome_fantasia=obj_in.nome_fantasia,
+                cnpj=obj_in.cnpj,
+                email=obj_in.email,
+                telefone=obj_in.telefone,
+                endereco=obj_in.endereco,
+                cidade=obj_in.cidade,
+                estado=obj_in.estado,
+                logo_url=obj_in.logo_url
             )
-        
-        # Criar objeto de dados
-        db_obj = Empresa(
-            razao_social=obj_in.razao_social,
-            nome_fantasia=obj_in.nome_fantasia,
-            cnpj=obj_in.cnpj,
-            email=obj_in.email,
-            telefone=obj_in.telefone,
-            endereco=obj_in.endereco,
-            cidade=obj_in.cidade,
-            estado=obj_in.estado,
-            logo_url=obj_in.logo_url
-        )
-        
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        
-        return db_obj
+            
+            self.session.add(db_obj)
+            await self.session.commit()
+            await self.session.refresh(db_obj)
+            
+            return db_obj
+        except SQLAlchemyError as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao criar empresa: {str(e)}"
+            )
     
-    def update(
+    async def update(
         self,
-        db: Session,
-        *,
-        db_obj: Empresa,
+        id_empresa: UUID,
         obj_in: EmpresaUpdate
     ) -> Empresa:
         """
         Atualiza uma empresa existente.
         
         Args:
-            db: Sessão do banco de dados
-            db_obj: Objeto empresa existente
+            id_empresa: ID da empresa a ser atualizada
             obj_in: Dados para atualizar
             
         Returns:
@@ -201,38 +224,76 @@ class EmpresaRepository(BaseRepository[Empresa, EmpresaCreate, EmpresaUpdate]):
             
         Raises:
             HTTPException: Se o CNPJ já estiver em uso por outra empresa
+            HTTPException: Se a empresa não for encontrada
         """
-        # Verificar se o CNPJ está sendo alterado e já existe
-        if obj_in.cnpj and obj_in.cnpj != db_obj.cnpj:
-            empresa_com_cnpj = self.get_by_cnpj(db, obj_in.cnpj)
-            if empresa_com_cnpj and empresa_com_cnpj.id_empresa != db_obj.id_empresa:
+        try:
+            # Buscar empresa existente
+            db_obj = await self.get_by_id(id_empresa)
+            if not db_obj:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="CNPJ já está em uso por outra empresa"
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Empresa não encontrada"
                 )
+            
+            # Verificar se o CNPJ está sendo alterado e já existe
+            if obj_in.cnpj and obj_in.cnpj != db_obj.cnpj:
+                empresa_com_cnpj = await self.get_by_cnpj(obj_in.cnpj)
+                if empresa_com_cnpj and empresa_com_cnpj.id_empresa != db_obj.id_empresa:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="CNPJ já está em uso por outra empresa"
+                    )
+            
+            # Atualizar os campos
+            update_data = obj_in.model_dump(exclude_unset=True)
+            for field, value in update_data.items():
+                setattr(db_obj, field, value)
+            
+            await self.session.commit()
+            await self.session.refresh(db_obj)
+            
+            return db_obj
+        except HTTPException:
+            await self.session.rollback()
+            raise
+        except SQLAlchemyError as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao atualizar empresa: {str(e)}"
+            )
+    
+    async def delete(self, id_empresa: UUID) -> bool:
+        """
+        Remove uma empresa.
         
-        # Atualizar os campos
-        if obj_in.razao_social is not None:
-            db_obj.razao_social = obj_in.razao_social
-        if obj_in.nome_fantasia is not None:
-            db_obj.nome_fantasia = obj_in.nome_fantasia
-        if obj_in.cnpj is not None:
-            db_obj.cnpj = obj_in.cnpj
-        if obj_in.email is not None:
-            db_obj.email = obj_in.email
-        if obj_in.telefone is not None:
-            db_obj.telefone = obj_in.telefone
-        if obj_in.endereco is not None:
-            db_obj.endereco = obj_in.endereco
-        if obj_in.cidade is not None:
-            db_obj.cidade = obj_in.cidade
-        if obj_in.estado is not None:
-            db_obj.estado = obj_in.estado
-        if obj_in.logo_url is not None:
-            db_obj.logo_url = obj_in.logo_url
-        
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        
-        return db_obj 
+        Args:
+            id_empresa: ID da empresa a ser removida
+            
+        Returns:
+            bool: True se a empresa foi removida com sucesso
+            
+        Raises:
+            HTTPException: Se a empresa não for encontrada
+        """
+        try:
+            db_obj = await self.get_by_id(id_empresa)
+            if not db_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Empresa não encontrada"
+                )
+            
+            await self.session.delete(db_obj)
+            await self.session.commit()
+            
+            return True
+        except HTTPException:
+            await self.session.rollback()
+            raise
+        except SQLAlchemyError as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao excluir empresa: {str(e)}"
+            ) 

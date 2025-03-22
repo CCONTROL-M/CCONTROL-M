@@ -1,102 +1,145 @@
 """Repositório para operações com usuários."""
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
-from sqlalchemy.orm import Session
+from sqlalchemy import select, func
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 from fastapi import HTTPException, status
 
 from app.models.usuario import Usuario
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate
-from app.repositories.base_repository import BaseRepository
 from app.utils.security import get_password_hash
 
 
-class UsuarioRepository(BaseRepository[Usuario, UsuarioCreate, UsuarioUpdate]):
+class UsuarioRepository:
     """Repositório para operações com usuários."""
     
-    def __init__(self):
-        """Inicializa o repositório com o modelo Usuario."""
-        super().__init__(Usuario)
+    def __init__(self, session: AsyncSession):
+        """
+        Inicializa o repositório com a sessão assíncrona do SQLAlchemy.
+        
+        Args:
+            session: Sessão assíncrona do SQLAlchemy
+        """
+        self.session = session
     
-    def get(self, db: Session, id: UUID) -> Optional[Usuario]:
+    async def get_by_id(self, id_usuario: UUID) -> Optional[Usuario]:
         """
         Obtém um usuário pelo ID.
         
         Args:
-            db: Sessão do banco de dados
-            id: ID do usuário
+            id_usuario: ID do usuário
             
         Returns:
             Usuario: Usuário encontrado ou None
         """
-        return db.query(Usuario).filter(Usuario.id_usuario == id).first()
+        query = select(Usuario).where(Usuario.id_usuario == id_usuario)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_by_email(self, db: Session, email: str) -> Optional[Usuario]:
+    async def get_by_email(self, email: str) -> Optional[Usuario]:
         """
         Obtém um usuário pelo email.
         
         Args:
-            db: Sessão do banco de dados
             email: Email do usuário
             
         Returns:
             Usuario: Usuário encontrado ou None
         """
-        return db.query(Usuario).filter(Usuario.email == email).first()
+        query = select(Usuario).where(Usuario.email == email)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_by_field(self, db: Session, field_name: str, value: Any) -> Optional[Usuario]:
+    async def get_by_field(self, field_name: str, value: Any) -> Optional[Usuario]:
         """
         Obtém um usuário pelo valor de um campo específico.
         
         Args:
-            db: Sessão do banco de dados
             field_name: Nome do campo
             value: Valor do campo
             
         Returns:
             Usuario: Usuário encontrado ou None
         """
-        return db.query(Usuario).filter(getattr(Usuario, field_name) == value).first()
+        query = select(Usuario).where(getattr(Usuario, field_name) == value)
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_multi(
+    async def get_multi(
         self,
-        db: Session,
-        *,
         skip: int = 0,
         limit: int = 100,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> List[Usuario]:
+        **filters
+    ) -> Tuple[List[Usuario], int]:
         """
         Obtém múltiplos usuários com paginação e filtragem opcional.
         
         Args:
-            db: Sessão do banco de dados
             skip: Registros para pular
             limit: Limite de registros
-            filters: Filtros adicionais
+            **filters: Filtros adicionais
             
         Returns:
-            List[Usuario]: Lista de usuários
+            Tuple[List[Usuario], int]: Lista de usuários e contagem total
         """
-        query = db.query(Usuario)
+        query = select(Usuario)
+        count_query = select(func.count()).select_from(Usuario)
         
-        if filters:
-            for field, value in filters.items():
-                if hasattr(Usuario, field):
-                    if field == "nome" or field == "email":
-                        # Busca por substring para campos de texto
-                        query = query.filter(getattr(Usuario, field).ilike(f"%{value}%"))
-                    else:
-                        query = query.filter(getattr(Usuario, field) == value)
+        # Aplicar filtros nas duas queries
+        for field, value in filters.items():
+            if hasattr(Usuario, field) and value is not None:
+                if field in ["nome", "email"]:
+                    # Busca por substring para campos de texto
+                    field_filter = getattr(Usuario, field).ilike(f"%{value}%")
+                else:
+                    field_filter = getattr(Usuario, field) == value
+                
+                query = query.where(field_filter)
+                count_query = count_query.where(field_filter)
         
-        return query.offset(skip).limit(limit).all()
+        # Aplicar paginação
+        query = query.offset(skip).limit(limit)
+        
+        # Executar consultas
+        result = await self.session.execute(query)
+        usuarios = list(result.scalars().all())
+        
+        count_result = await self.session.execute(count_query)
+        total = count_result.scalar_one()
+        
+        return usuarios, total
     
-    def create(self, db: Session, *, obj_in: UsuarioCreate) -> Usuario:
+    async def get_count(self, **filters) -> int:
+        """
+        Obtém a contagem total de usuários com filtros opcionais.
+        
+        Args:
+            **filters: Filtros adicionais
+            
+        Returns:
+            int: Contagem de usuários
+        """
+        query = select(func.count()).select_from(Usuario)
+        
+        # Aplicar filtros
+        for field, value in filters.items():
+            if hasattr(Usuario, field) and value is not None:
+                if field in ["nome", "email"]:
+                    # Busca por substring para campos de texto
+                    query = query.where(getattr(Usuario, field).ilike(f"%{value}%"))
+                else:
+                    query = query.where(getattr(Usuario, field) == value)
+        
+        result = await self.session.execute(query)
+        return result.scalar_one()
+    
+    async def create(self, usuario: UsuarioCreate) -> Usuario:
         """
         Cria um novo usuário.
         
         Args:
-            db: Sessão do banco de dados
-            obj_in: Dados do usuário
+            usuario: Dados do usuário
             
         Returns:
             Usuario: Usuário criado
@@ -104,73 +147,130 @@ class UsuarioRepository(BaseRepository[Usuario, UsuarioCreate, UsuarioUpdate]):
         Raises:
             HTTPException: Se o email já estiver em uso
         """
-        # Verificar se o email já existe
-        if self.get_by_email(db, obj_in.email):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Email já está em uso por outro usuário"
+        try:
+            # Verificar se o email já existe
+            existente = await self.get_by_email(usuario.email)
+            if existente:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email já está em uso por outro usuário"
+                )
+            
+            # Criar objeto de dados com senha hasheada
+            db_obj = Usuario(
+                id_empresa=usuario.id_empresa,
+                nome=usuario.nome,
+                email=usuario.email,
+                senha_hash=get_password_hash(usuario.senha),
+                tipo_usuario=usuario.tipo_usuario,
+                telas_permitidas=usuario.telas_permitidas
             )
-        
-        # Criar objeto de dados com senha hasheada
-        db_obj = Usuario(
-            id_empresa=obj_in.id_empresa,
-            nome=obj_in.nome,
-            email=obj_in.email,
-            senha_hash=get_password_hash(obj_in.senha),
-            tipo_usuario=obj_in.tipo_usuario,
-            telas_permitidas=obj_in.telas_permitidas
-        )
-        
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        
-        return db_obj
+            
+            self.session.add(db_obj)
+            await self.session.commit()
+            await self.session.refresh(db_obj)
+            
+            return db_obj
+        except SQLAlchemyError as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao criar usuário: {str(e)}"
+            )
     
-    def update(
-        self,
-        db: Session,
-        *,
-        db_obj: Usuario,
-        obj_in: UsuarioUpdate
-    ) -> Usuario:
+    async def update(self, id_usuario: UUID, usuario: UsuarioUpdate) -> Optional[Usuario]:
         """
         Atualiza um usuário existente.
         
         Args:
-            db: Sessão do banco de dados
-            db_obj: Objeto usuário existente
-            obj_in: Dados para atualizar
+            id_usuario: ID do usuário
+            usuario: Dados para atualizar
             
         Returns:
             Usuario: Usuário atualizado
             
         Raises:
             HTTPException: Se o email já estiver em uso por outro usuário
+            HTTPException: Se o usuário não for encontrado
         """
-        # Verificar se o email está sendo alterado e já existe
-        if obj_in.email and obj_in.email != db_obj.email:
-            usuario_com_email = self.get_by_email(db, obj_in.email)
-            if usuario_com_email and usuario_com_email.id_usuario != db_obj.id_usuario:
+        try:
+            # Buscar usuário existente
+            db_obj = await self.get_by_id(id_usuario)
+            if not db_obj:
                 raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Email já está em uso por outro usuário"
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Usuário não encontrado"
                 )
+                
+            # Verificar se o email está sendo alterado e já existe
+            if usuario.email and usuario.email != db_obj.email:
+                existente = await self.get_by_email(usuario.email)
+                if existente and existente.id_usuario != id_usuario:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Email já está em uso por outro usuário"
+                    )
+            
+            # Atualizar os campos
+            update_data = usuario.model_dump(exclude_unset=True)
+            
+            # Tratar a senha separadamente
+            if "senha" in update_data:
+                senha = update_data.pop("senha")
+                if senha:
+                    db_obj.senha_hash = get_password_hash(senha)
+            
+            # Atualizar os demais campos
+            for field, value in update_data.items():
+                if hasattr(db_obj, field):
+                    setattr(db_obj, field, value)
+            
+            await self.session.commit()
+            await self.session.refresh(db_obj)
+            
+            return db_obj
+        except HTTPException:
+            await self.session.rollback()
+            raise
+        except SQLAlchemyError as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao atualizar usuário: {str(e)}"
+            )
         
-        # Atualizar os campos
-        if obj_in.nome is not None:
-            db_obj.nome = obj_in.nome
-        if obj_in.email is not None:
-            db_obj.email = obj_in.email
-        if obj_in.tipo_usuario is not None:
-            db_obj.tipo_usuario = obj_in.tipo_usuario
-        if obj_in.telas_permitidas is not None:
-            db_obj.telas_permitidas = obj_in.telas_permitidas
-        if obj_in.senha is not None:
-            db_obj.senha_hash = get_password_hash(obj_in.senha)
+    async def delete(self, id_usuario: UUID) -> bool:
+        """
+        Remove um usuário.
         
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        
-        return db_obj 
+        Args:
+            id_usuario: ID do usuário
+            
+        Returns:
+            bool: True se removido com sucesso
+            
+        Raises:
+            HTTPException: Se o usuário não for encontrado
+            HTTPException: Se ocorrer um erro ao excluir
+        """
+        try:
+            db_obj = await self.get_by_id(id_usuario)
+            if not db_obj:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Usuário não encontrado"
+                )
+                
+            await self.session.delete(db_obj)
+            await self.session.commit()
+            
+            return True
+        except HTTPException:
+            await self.session.rollback()
+            raise
+        except SQLAlchemyError as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao excluir usuário: {str(e)}"
+            ) 

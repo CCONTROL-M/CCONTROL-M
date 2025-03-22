@@ -1,0 +1,43 @@
+# Git
+.git
+.gitignore
+
+# Caches e Compilados
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Configurações de ambiente
+.env
+.env.*
+!.env.example
+
+# Arquivos específicos para desenvolvimento
+.vscode/
+.idea/
+
+# Logs e Dados
+logs/*
+*.log
+uploads/*
+*.sqlite
+*.db
+
+# Arquivos Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Documentação e testes
+docs/
+tests/
+README.md
+
+# Virtualenv
+venv/
+env/
+.venv/ 

@@ -2,38 +2,9 @@
 from datetime import datetime
 from typing import Optional, List
 from uuid import UUID
-from pydantic import BaseModel, Field, EmailStr, field_validator
+from pydantic import BaseModel, Field, EmailStr, field_validator, RootModel
 import re
-
-
-def validar_cnpj(cnpj: str) -> str:
-    """
-    Valida o formato do CNPJ.
-    
-    Args:
-        cnpj: CNPJ a ser validado
-        
-    Returns:
-        str: CNPJ validado
-        
-    Raises:
-        ValueError: Se o CNPJ não estiver no formato válido
-    """
-    # Remove caracteres especiais para validação
-    cnpj_limpo = re.sub(r'[^0-9]', '', cnpj)
-    
-    # Verifica se tem 14 dígitos
-    if len(cnpj_limpo) != 14:
-        raise ValueError("CNPJ deve conter 14 dígitos numéricos")
-    
-    # Verifica se todos os dígitos são iguais (caso inválido)
-    if len(set(cnpj_limpo)) == 1:
-        raise ValueError("CNPJ inválido")
-    
-    # Reaplica a formatação padrão XX.XXX.XXX/XXXX-XX
-    cnpj_formatado = f"{cnpj_limpo[:2]}.{cnpj_limpo[2:5]}.{cnpj_limpo[5:8]}/{cnpj_limpo[8:12]}-{cnpj_limpo[12:]}"
-    
-    return cnpj_formatado
+from .validators import validar_cnpj
 
 
 class EmpresaBase(BaseModel):
@@ -47,6 +18,7 @@ class EmpresaBase(BaseModel):
     cidade: Optional[str] = Field(None, description="Cidade da empresa", max_length=100)
     estado: Optional[str] = Field(None, description="Estado da empresa (sigla)", max_length=2)
     logo_url: Optional[str] = Field(None, description="URL da logomarca da empresa", max_length=255)
+    ativo: Optional[bool] = Field(True, description="Indica se a empresa está ativa")
 
     @field_validator('cnpj')
     def validar_formato_cnpj(cls, v: str) -> str:
@@ -79,6 +51,7 @@ class EmpresaUpdate(BaseModel):
     cidade: Optional[str] = Field(None, description="Cidade da empresa", max_length=100)
     estado: Optional[str] = Field(None, description="Estado da empresa (sigla)", max_length=2)
     logo_url: Optional[str] = Field(None, description="URL da logomarca da empresa", max_length=255)
+    ativo: Optional[bool] = None
 
     @field_validator('cnpj')
     def validar_formato_cnpj(cls, v: Optional[str]) -> Optional[str]:
@@ -107,19 +80,24 @@ class EmpresaInDB(EmpresaBase):
         from_attributes = True
 
 
-class Empresa(EmpresaInDB):
-    """Schema completo de empresa para resposta da API."""
+class EmpresaResponse(EmpresaBase):
+    """Schema para resposta de empresas."""
+    id_empresa: UUID
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+
+
+class Empresa(EmpresaResponse):
+    """
+    Alias para EmpresaResponse.
+    Mantido por motivos de compatibilidade com código existente.
+    """
     pass
 
 
-class EmpresaList(BaseModel):
-    """Schema reduzido para listagem de empresas."""
-    id_empresa: UUID
-    razao_social: str
-    nome_fantasia: Optional[str] = None
-    cnpj: str
-    cidade: Optional[str] = None
-    estado: Optional[str] = None
-    
-    class Config:
-        from_attributes = True 
+class EmpresaList(RootModel):
+    """Schema para listar empresas."""
+    root: List[Empresa] 

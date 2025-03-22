@@ -12,7 +12,7 @@ from .forma_pagamento_repository import FormaPagamentoRepository
 from .venda_repository import VendaRepository
 from .parcela_repository import ParcelaRepository
 from .produto_repository import ProdutoRepository
-from .log_repository import LogRepository
+from .log_sistema_repository import LogSistemaRepository
 
 # Lista de repositórios exportados
 __all__ = [
@@ -28,5 +28,5 @@ __all__ = [
     'VendaRepository',
     'ParcelaRepository',
     'ProdutoRepository',
-    'LogRepository'
+    'LogSistemaRepository'
 ] 

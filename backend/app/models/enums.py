@@ -1,55 +1,27 @@
-"""Tipos enumerados utilizados no sistema CCONTROL-M."""
-import enum
-from typing import List
+"""Definição de enumerações para o sistema CCONTROL-M."""
+from enum import Enum, auto
 
+class TipoLancamento(str, Enum):
+    """Tipo de lançamento financeiro."""
+    ENTRADA = "entrada"
+    SAIDA = "saida"
 
-class TipoLancamento(str, enum.Enum):
-    """Tipos de lançamentos financeiros."""
-    
-    RECEITA = "receita"
-    DESPESA = "despesa"
-    
-    @classmethod
-    def list(cls) -> List[str]:
-        """Retorna lista de valores do enum."""
-        return [e.value for e in cls]
-
-
-class StatusLancamento(str, enum.Enum):
-    """Status de lançamentos financeiros."""
-    
+class StatusLancamento(str, Enum):
+    """Status do lançamento financeiro."""
     PENDENTE = "pendente"
     PAGO = "pago"
     CANCELADO = "cancelado"
-    
-    @classmethod
-    def list(cls) -> List[str]:
-        """Retorna lista de valores do enum."""
-        return [e.value for e in cls]
 
-
-class StatusParcela(str, enum.Enum):
-    """Status de parcelas de pagamento."""
-    
-    PENDENTE = "pendente"
-    PAGO = "pago"
-    CANCELADO = "cancelado"
-    
-    @classmethod
-    def list(cls) -> List[str]:
-        """Retorna lista de valores do enum."""
-        return [e.value for e in cls]
-
-
-class StatusVenda(str, enum.Enum):
-    """Status de vendas."""
-    
-    PENDENTE = "pendente"
-    PAGO = "pago"
-    CANCELADO = "cancelado"
+class StatusVenda(str, Enum):
+    """Status de uma venda."""
+    EM_ABERTO = "em_aberto"
+    CONCLUIDA = "concluida"
+    CANCELADA = "cancelada"
     PARCIAL = "parcial"
-    
-    @classmethod
-    def list(cls) -> List[str]:
-        """Retorna lista de valores do enum."""
-        return [e.value for e in cls] 
+
+class StatusParcela(str, Enum):
+    """Status de uma parcela."""
+    PENDENTE = "pendente"
+    PAGA = "paga"
+    CANCELADA = "cancelada"
+    ATRASADA = "atrasada" 

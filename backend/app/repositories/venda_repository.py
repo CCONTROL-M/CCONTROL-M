@@ -1,687 +1,543 @@
-"""Repositório para operações com vendas."""
-from typing import Optional, List, Dict, Any, Tuple
+"""Repositório para operações de banco de dados relacionadas a vendas."""
+from datetime import datetime
+from typing import Dict, List, Optional, Any, Tuple
 from uuid import UUID
-from datetime import date, datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, func, select
+
+from sqlalchemy import select, func, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
 
 from app.models.venda import Venda
-from app.models.cliente import Cliente
 from app.models.produto import Produto
-from app.models.lancamento import Lancamento
-from app.models.conta_bancaria import ContaBancaria
+from app.models.cliente import Cliente
+from app.models.item_venda import ItemVenda
+from app.models.empresa import Empresa
 from app.models.forma_pagamento import FormaPagamento
-from app.schemas.venda import VendaCreate, VendaUpdate, StatusVenda, ItemVenda
-from app.repositories.base_repository import BaseRepository
-from app.repositories.lancamento_repository import LancamentoRepository
 
 
-class VendaRepository(BaseRepository[Venda, VendaCreate, VendaUpdate]):
+class VendaRepository:
     """Repositório para operações com vendas."""
-    
-    def __init__(self):
-        """Inicializa o repositório com o modelo Venda."""
-        super().__init__(Venda)
-    
-    def get(self, db: Session, id: UUID) -> Optional[Venda]:
+
+    def __init__(self, session: AsyncSession):
+        """Inicializar repositório com sessão."""
+        self.session = session
+
+    async def get_by_id(self, id_venda: UUID, id_empresa: Optional[UUID] = None) -> Optional[Venda]:
         """
-        Obtém uma venda pelo ID.
+        Obter venda pelo ID.
         
         Args:
-            db: Sessão do banco de dados
-            id: ID da venda
+            id_venda: ID da venda
+            id_empresa: ID da empresa para verificação (opcional)
             
         Returns:
-            Venda: Venda encontrada ou None
+            Venda se encontrada, None caso contrário
         """
-        return db.query(Venda).filter(Venda.id_venda == id).first()
-    
-    def get_with_relacionamentos(
-        self, 
-        db: Session, 
-        id: UUID
-    ) -> Optional[Venda]:
-        """
-        Obtém uma venda pelo ID com informações relacionadas de cliente e lançamentos.
+        query = (
+            select(Venda)
+            .options(
+                selectinload(Venda.itens).selectinload(ItemVenda.produto),
+                selectinload(Venda.cliente),
+                selectinload(Venda.forma_pagamento)
+            )
+            .where(Venda.id_venda == id_venda)
+        )
         
-        Args:
-            db: Sessão do banco de dados
-            id: ID da venda
+        if id_empresa:
+            query = query.where(Venda.id_empresa == id_empresa)
             
-        Returns:
-            Venda: Venda encontrada ou None
-        """
-        return db.query(Venda).filter(
-            Venda.id_venda == id
-        ).first()
-    
-    def get_by_empresa(
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def get_by_empresa(
         self, 
-        db: Session, 
         id_empresa: UUID,
-        status: Optional[str] = None
-    ) -> List[Venda]:
-        """
-        Obtém todas as vendas de uma empresa.
-        
-        Args:
-            db: Sessão do banco de dados
-            id_empresa: ID da empresa
-            status: Filtro por status
-            
-        Returns:
-            List[Venda]: Lista de vendas da empresa
-        """
-        query = db.query(Venda).filter(Venda.id_empresa == id_empresa)
-            
-        if status:
-            query = query.filter(Venda.status == status)
-            
-        return query.all()
-    
-    def get_multi(
-        self,
-        db: Session,
-        *,
         skip: int = 0,
         limit: int = 100,
-        id_empresa: Optional[UUID] = None,
+        data_inicio: Optional[datetime] = None,
+        data_fim: Optional[datetime] = None,
         id_cliente: Optional[UUID] = None,
-        data_inicio: Optional[date] = None,
-        data_fim: Optional[date] = None,
         status: Optional[str] = None,
-        parcelado: Optional[bool] = None,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> List[Venda]:
+        forma_pagamento: Optional[UUID] = None
+    ) -> Tuple[List[Venda], int]:
         """
-        Obtém múltiplas vendas com paginação e filtragem opcional.
+        Listar vendas por empresa com filtros.
         
         Args:
-            db: Sessão do banco de dados
-            skip: Registros para pular
-            limit: Limite de registros
-            id_empresa: Filtrar por empresa específica
-            id_cliente: Filtrar por cliente específico
-            data_inicio: Data inicial para filtro
-            data_fim: Data final para filtro
-            status: Filtrar por status
-            parcelado: Filtrar por vendas parceladas/não-parceladas
-            filters: Filtros adicionais
-            
-        Returns:
-            List[Venda]: Lista de vendas
-        """
-        query = db.query(Venda)
-        
-        # Aplicar filtros principais
-        if id_empresa:
-            query = query.filter(Venda.id_empresa == id_empresa)
-        
-        if id_cliente:
-            query = query.filter(Venda.id_cliente == id_cliente)
-            
-        if status:
-            query = query.filter(Venda.status == status)
-            
-        if parcelado is not None:
-            query = query.filter(Venda.parcelado == parcelado)
-        
-        # Filtro por período de datas
-        if data_inicio and data_fim:
-            query = query.filter(
-                Venda.data_venda.between(data_inicio, data_fim)
-            )
-        elif data_inicio:
-            query = query.filter(Venda.data_venda >= data_inicio)
-        elif data_fim:
-            query = query.filter(Venda.data_venda <= data_fim)
-        
-        # Filtros adicionais
-        if filters:
-            # Tratamento especial para busca por descrição
-            if "descricao" in filters and filters["descricao"]:
-                termo_busca = f"%{filters['descricao']}%"
-                query = query.filter(Venda.descricao.ilike(termo_busca))
-                del filters["descricao"]  # Remove para não processar novamente
-            
-            # Tratamento para busca por número da venda
-            if "numero_venda" in filters and filters["numero_venda"]:
-                termo_busca = f"%{filters['numero_venda']}%"
-                query = query.filter(Venda.numero_venda.ilike(termo_busca))
-                del filters["numero_venda"]  # Remove para não processar novamente
-            
-            # Processamento dos demais filtros
-            for field, value in filters.items():
-                if value is not None and hasattr(Venda, field):
-                    query = query.filter(getattr(Venda, field) == value)
-        
-        # Ordenação padrão por data
-        query = query.order_by(Venda.data_venda.desc())
-        
-        return query.offset(skip).limit(limit).all()
-    
-    def get_count(
-        self, 
-        db: Session, 
-        id_empresa: Optional[UUID] = None,
-        id_cliente: Optional[UUID] = None,
-        data_inicio: Optional[date] = None,
-        data_fim: Optional[date] = None,
-        status: Optional[str] = None,
-        parcelado: Optional[bool] = None,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> int:
-        """
-        Obtém a contagem total de vendas com filtros opcionais.
-        
-        Args:
-            db: Sessão do banco de dados
-            id_empresa: Filtrar por empresa específica
-            id_cliente: Filtrar por cliente específico
-            data_inicio: Data inicial para filtro
-            data_fim: Data final para filtro
-            status: Filtrar por status
-            parcelado: Filtrar por vendas parceladas/não-parceladas
-            filters: Filtros adicionais
-            
-        Returns:
-            int: Contagem de vendas
-        """
-        query = db.query(Venda)
-        
-        # Aplicar filtros principais
-        if id_empresa:
-            query = query.filter(Venda.id_empresa == id_empresa)
-        
-        if id_cliente:
-            query = query.filter(Venda.id_cliente == id_cliente)
-            
-        if status:
-            query = query.filter(Venda.status == status)
-            
-        if parcelado is not None:
-            query = query.filter(Venda.parcelado == parcelado)
-        
-        # Filtro por período de datas
-        if data_inicio and data_fim:
-            query = query.filter(
-                Venda.data_venda.between(data_inicio, data_fim)
-            )
-        elif data_inicio:
-            query = query.filter(Venda.data_venda >= data_inicio)
-        elif data_fim:
-            query = query.filter(Venda.data_venda <= data_fim)
-        
-        # Filtros adicionais
-        if filters:
-            # Tratamento especial para busca por descrição
-            if "descricao" in filters and filters["descricao"]:
-                termo_busca = f"%{filters['descricao']}%"
-                query = query.filter(Venda.descricao.ilike(termo_busca))
-                del filters["descricao"]  # Remove para não processar novamente
-            
-            # Tratamento para busca por número da venda
-            if "numero_venda" in filters and filters["numero_venda"]:
-                termo_busca = f"%{filters['numero_venda']}%"
-                query = query.filter(Venda.numero_venda.ilike(termo_busca))
-                del filters["numero_venda"]  # Remove para não processar novamente
-            
-            # Processamento dos demais filtros
-            for field, value in filters.items():
-                if value is not None and hasattr(Venda, field):
-                    query = query.filter(getattr(Venda, field) == value)
-        
-        return query.count()
-    
-    def get_totais(
-        self, 
-        db: Session, 
-        id_empresa: UUID,
-        data_inicio: Optional[date] = None,
-        data_fim: Optional[date] = None,
-        id_cliente: Optional[UUID] = None
-    ) -> Dict[str, Any]:
-        """
-        Calcula os totais de vendas para uma empresa.
-        
-        Args:
-            db: Sessão do banco de dados
             id_empresa: ID da empresa
-            data_inicio: Data inicial para filtro
-            data_fim: Data final para filtro
-            id_cliente: Filtrar por cliente específico
+            skip: Registros para pular na paginação
+            limit: Máximo de registros para retornar
+            data_inicio: Filtrar por data inicial
+            data_fim: Filtrar por data final
+            id_cliente: Filtrar por cliente
+            status: Filtrar por status
+            forma_pagamento: Filtrar por forma de pagamento
             
         Returns:
-            Dict[str, Any]: Dicionário com os totais calculados
+            Lista de vendas e contagem total
         """
-        # Filtros base
-        filtros = [Venda.id_empresa == id_empresa]
+        # Consulta principal para vendas
+        query = (
+            select(Venda)
+            .options(
+                selectinload(Venda.cliente),
+                selectinload(Venda.forma_pagamento)
+            )
+            .where(Venda.id_empresa == id_empresa)
+        )
         
-        # Adicionar filtros opcionais
+        # Consulta para contagem
+        count_query = (
+            select(func.count())
+            .select_from(Venda)
+            .where(Venda.id_empresa == id_empresa)
+        )
+        
+        # Aplicar filtros
+        if data_inicio:
+            query = query.where(Venda.data_venda >= data_inicio)
+            count_query = count_query.where(Venda.data_venda >= data_inicio)
+            
+        if data_fim:
+            query = query.where(Venda.data_venda <= data_fim)
+            count_query = count_query.where(Venda.data_venda <= data_fim)
+            
         if id_cliente:
-            filtros.append(Venda.id_cliente == id_cliente)
+            query = query.where(Venda.id_cliente == id_cliente)
+            count_query = count_query.where(Venda.id_cliente == id_cliente)
+            
+        if status:
+            query = query.where(Venda.status == status)
+            count_query = count_query.where(Venda.status == status)
+            
+        if forma_pagamento:
+            query = query.where(Venda.id_forma_pagamento == forma_pagamento)
+            count_query = count_query.where(Venda.id_forma_pagamento == forma_pagamento)
         
-        # Filtro por período de datas
-        if data_inicio and data_fim:
-            filtros.append(Venda.data_venda.between(data_inicio, data_fim))
-        elif data_inicio:
-            filtros.append(Venda.data_venda >= data_inicio)
-        elif data_fim:
-            filtros.append(Venda.data_venda <= data_fim)
+        # Ordenar por data mais recente
+        query = query.order_by(desc(Venda.data_venda))
         
-        # Total de vendas por status
-        total_pendentes = db.query(func.sum(Venda.valor_liquido)).filter(
-            *filtros, 
-            Venda.status == "pendente"
-        ).scalar() or 0
+        # Executar consulta de contagem
+        count_result = await self.session.execute(count_query)
+        total_count = count_result.scalar_one() or 0
         
-        total_concluidas = db.query(func.sum(Venda.valor_liquido)).filter(
-            *filtros, 
-            Venda.status == "concluida"
-        ).scalar() or 0
+        # Aplicar paginação
+        query = query.offset(skip).limit(limit)
         
-        total_canceladas = db.query(func.sum(Venda.valor_liquido)).filter(
-            *filtros, 
-            Venda.status == "cancelada"
-        ).scalar() or 0
+        # Executar consulta principal
+        result = await self.session.execute(query)
+        vendas = result.scalars().all()
         
-        # Total geral
-        total_geral = float(total_pendentes) + float(total_concluidas)
-        
-        # Total de itens vendidos
-        total_itens = 0
-        vendas = db.query(Venda).filter(*filtros, Venda.status != "cancelada").all()
-        for venda in vendas:
-            itens = venda.itens_venda
-            if isinstance(itens, dict) and "itens" in itens:
-                total_itens += len(itens["itens"])
-        
-        return {
-            "total_pendentes": float(total_pendentes),
-            "total_concluidas": float(total_concluidas),
-            "total_canceladas": float(total_canceladas),
-            "total_geral": total_geral,
-            "total_itens_vendidos": total_itens,
-            "periodo_inicio": data_inicio,
-            "periodo_fim": data_fim
-        }
-    
-    def create(
-        self, 
-        db: Session, 
-        *, 
-        obj_in: VendaCreate,
-        criar_lancamento: bool = True,
-        id_conta: Optional[UUID] = None,
-        id_forma_pagamento: Optional[UUID] = None
-    ) -> Venda:
+        return list(vendas), total_count
+
+    async def get_with_items(self, id_venda: UUID, id_empresa: Optional[UUID] = None) -> Optional[Venda]:
         """
-        Cria uma nova venda.
+        Obter venda com seus itens pelo ID.
         
         Args:
-            db: Sessão do banco de dados
-            obj_in: Dados da venda
-            criar_lancamento: Se deve criar lançamento(s) financeiro(s) associado(s)
-            id_conta: ID da conta bancária para o lançamento (obrigatório se criar_lancamento=True)
-            id_forma_pagamento: ID da forma de pagamento (obrigatório se criar_lancamento=True)
+            id_venda: ID da venda
+            id_empresa: ID da empresa para verificação (opcional)
             
         Returns:
-            Venda: Venda criada
-            
-        Raises:
-            HTTPException: Se cliente não existir ou se parâmetros de lançamento estiverem inválidos
+            Venda com itens se encontrada, None caso contrário
         """
-        # Verificar se cliente existe, se fornecido
-        if obj_in.id_cliente:
-            cliente = db.query(Cliente).filter(
-                Cliente.id_cliente == obj_in.id_cliente,
-                Cliente.id_empresa == obj_in.id_empresa
-            ).first()
-            if not cliente:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Cliente não encontrado ou não pertence a esta empresa"
-                )
-        
-        # Verificar produtos existentes
-        for item in obj_in.itens_venda:
-            produto = db.query(Produto).filter(
-                Produto.id_produto == item.id_produto,
-                Produto.id_empresa == obj_in.id_empresa
-            ).first()
-            if not produto:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Produto com ID {item.id_produto} não encontrado ou não pertence a esta empresa"
-                )
-        
-        # Validar informações para criação de lançamento
-        if criar_lancamento:
-            if not id_conta:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="ID da conta bancária é necessário para criar lançamento"
-                )
-            
-            if not id_forma_pagamento:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="ID da forma de pagamento é necessário para criar lançamento"
-                )
-            
-            # Verificar se conta e forma de pagamento existem
-            conta = db.query(ContaBancaria).filter(
-                ContaBancaria.id_conta == id_conta,
-                ContaBancaria.id_empresa == obj_in.id_empresa
-            ).first()
-            if not conta:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conta bancária não encontrada ou não pertence a esta empresa"
-                )
-            
-            forma = db.query(FormaPagamento).filter(
-                FormaPagamento.id_forma == id_forma_pagamento,
-                FormaPagamento.id_empresa == obj_in.id_empresa
-            ).first()
-            if not forma:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Forma de pagamento não encontrada ou não pertence a esta empresa"
-                )
-            
-        # Preparar dados da venda
-        itens_json = {
-            "itens": [item.dict() for item in obj_in.itens_venda]
-        }
-        
-        venda_data = obj_in.dict(exclude={"itens_venda"})
-        venda_data["itens_venda"] = itens_json
-        
-        db_obj = Venda(**venda_data)
-        
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        
-        # Criar lançamento(s) financeiros se solicitado
-        if criar_lancamento:
-            self._criar_lancamentos_venda(
-                db=db, 
-                venda=db_obj, 
-                id_conta=id_conta, 
-                id_forma_pagamento=id_forma_pagamento
+        query = (
+            select(Venda)
+            .options(
+                selectinload(Venda.itens).selectinload(ItemVenda.produto),
+                selectinload(Venda.cliente),
+                selectinload(Venda.forma_pagamento)
             )
+            .where(Venda.id_venda == id_venda)
+        )
         
-        return db_obj
-    
-    def update(
-        self,
-        db: Session,
-        *,
-        db_obj: Venda,
-        obj_in: VendaUpdate
-    ) -> Venda:
+        if id_empresa:
+            query = query.where(Venda.id_empresa == id_empresa)
+            
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
+
+    async def create(self, venda_data: Dict[str, Any]) -> Venda:
         """
-        Atualiza uma venda existente.
+        Criar nova venda.
         
         Args:
-            db: Sessão do banco de dados
-            db_obj: Objeto venda existente
-            obj_in: Dados para atualizar
+            venda_data: Dados da venda
             
         Returns:
-            Venda: Venda atualizada
-            
-        Raises:
-            HTTPException: Se cliente não existir ou se a venda já tiver lançamentos
+            Venda criada
         """
-        # Verificar se cliente existe, se estiver sendo alterado
-        if obj_in.id_cliente is not None and obj_in.id_cliente != db_obj.id_cliente:
-            cliente = db.query(Cliente).filter(
-                Cliente.id_cliente == obj_in.id_cliente,
-                Cliente.id_empresa == db_obj.id_empresa
-            ).first()
-            if not cliente:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Cliente não encontrado ou não pertence a esta empresa"
-                )
-        
-        # Verificar se existem lançamentos associados
-        tem_lancamentos = db.query(Lancamento).filter(
-            Lancamento.id_venda == db_obj.id_venda
-        ).count() > 0
-        
-        # Se houver lançamentos, restringir os campos que podem ser alterados
-        if tem_lancamentos:
-            campos_permitidos = {"status", "observacao", "nota_fiscal"}
-            update_data = {}
+        try:
+            # Criar objeto Venda
+            venda = Venda(**venda_data)
             
-            # Filtrar apenas os campos permitidos
-            data_dict = obj_in.dict(exclude_unset=True)
-            for field in campos_permitidos:
-                if field in data_dict:
-                    update_data[field] = data_dict[field]
-                    
-            # Se não houver campos válidos para atualizar, retornar erro
-            if not update_data:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Não é possível alterar os dados principais de uma venda com lançamentos. Apenas status, observação e nota fiscal podem ser alterados."
-                )
-        else:
-            # Se não houver lançamentos, permitir alteração completa
-            update_data = obj_in.dict(exclude_unset=True)
-        
-        # Atualizar campos
-        for field, value in update_data.items():
-            setattr(db_obj, field, value)
-        
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        
-        return db_obj
-    
-    def cancelar(
-        self, 
-        db: Session, 
-        *, 
-        venda: Venda, 
-        cancelar_lancamentos: bool = True
-    ) -> Venda:
-        """
-        Cancela uma venda e opcionalmente seus lançamentos.
-        
-        Args:
-            db: Sessão do banco de dados
-            venda: Objeto da venda
-            cancelar_lancamentos: Se deve cancelar os lançamentos associados
+            # Salvar a venda
+            self.session.add(venda)
+            await self.session.commit()
+            await self.session.refresh(venda)
             
-        Returns:
-            Venda: Venda cancelada
-            
-        Raises:
-            HTTPException: Se a venda já estiver cancelada
-        """
-        if venda.status == "cancelada":
             return venda
-        
-        # Alterar status para cancelada
-        venda.status = "cancelada"
-        venda.updated_at = datetime.now()
-        
-        db.add(venda)
-        db.commit()
-        db.refresh(venda)
-        
-        # Cancelar lançamentos associados se solicitado
-        if cancelar_lancamentos:
-            lancamentos = db.query(Lancamento).filter(
-                Lancamento.id_venda == venda.id_venda
-            ).all()
-            
-            lancamento_repo = LancamentoRepository()
-            for lancamento in lancamentos:
-                lancamento_repo.cancelar(db=db, lancamento=lancamento)
-        
-        return venda
-    
-    def concluir(
-        self, 
-        db: Session, 
-        *, 
-        venda: Venda
-    ) -> Venda:
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao criar venda: {str(e)}"
+            )
+
+    async def update(self, id_venda: UUID, id_empresa: UUID, venda_data: Dict[str, Any]) -> Optional[Venda]:
         """
-        Marca uma venda como concluída.
+        Atualizar venda existente.
         
         Args:
-            db: Sessão do banco de dados
-            venda: Objeto da venda
+            id_venda: ID da venda
+            id_empresa: ID da empresa para verificação
+            venda_data: Dados para atualização
             
         Returns:
-            Venda: Venda concluída
-            
-        Raises:
-            HTTPException: Se a venda já estiver cancelada
+            Venda atualizada ou None se não encontrada
         """
-        if venda.status == "concluida":
+        try:
+            # Verificar se a venda existe
+            query = (
+                select(Venda)
+                .where(Venda.id_venda == id_venda)
+                .where(Venda.id_empresa == id_empresa)
+            )
+            
+            result = await self.session.execute(query)
+            venda = result.scalar_one_or_none()
+            
+            if not venda:
+                return None
+                
+            # Atualizar atributos
+            for key, value in venda_data.items():
+                if hasattr(venda, key):
+                    setattr(venda, key, value)
+            
+            # Salvar alterações
+            self.session.add(venda)
+            await self.session.commit()
+            await self.session.refresh(venda)
+            
             return venda
-        
-        if venda.status == "cancelada":
+        except Exception as e:
+            await self.session.rollback()
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Não é possível concluir uma venda cancelada"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao atualizar venda: {str(e)}"
             )
-        
-        # Alterar status para concluída
-        venda.status = "concluida"
-        venda.updated_at = datetime.now()
-        
-        db.add(venda)
-        db.commit()
-        db.refresh(venda)
-        
-        return venda
-    
-    def remove(self, db: Session, *, id: UUID) -> Venda:
+
+    async def delete(self, id_venda: UUID, id_empresa: UUID) -> bool:
         """
-        Remove uma venda.
+        Excluir venda pelo ID.
         
         Args:
-            db: Sessão do banco de dados
-            id: ID da venda
+            id_venda: ID da venda
+            id_empresa: ID da empresa para verificação
             
         Returns:
-            Venda: Venda removida
+            True se removida com sucesso
+        """
+        try:
+            # Verificar se a venda existe
+            query = (
+                select(Venda)
+                .where(Venda.id_venda == id_venda)
+                .where(Venda.id_empresa == id_empresa)
+            )
             
-        Raises:
-            HTTPException: Se a venda não for encontrada ou tiver lançamentos associados
-        """
-        venda = db.query(Venda).filter(Venda.id_venda == id).first()
-        if not venda:
+            result = await self.session.execute(query)
+            venda = result.scalar_one_or_none()
+            
+            if not venda:
+                return False
+                
+            # Excluir a venda
+            await self.session.delete(venda)
+            await self.session.commit()
+            
+            return True
+        except Exception as e:
+            await self.session.rollback()
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Venda não encontrada"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao excluir venda: {str(e)}"
             )
-        
-        # Verificar se existem lançamentos associados
-        tem_lancamentos = db.query(Lancamento).filter(
-            Lancamento.id_venda == id
-        ).count() > 0
-        
-        if tem_lancamentos:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Não é possível excluir uma venda com lançamentos associados. Cancele a venda em vez de excluí-la."
-            )
-        
-        db.delete(venda)
-        db.commit()
-        
-        return venda
-    
-    def _criar_lancamentos_venda(
-        self, 
-        db: Session, 
-        venda: Venda, 
-        id_conta: UUID, 
-        id_forma_pagamento: UUID
-    ) -> List[Lancamento]:
+
+    async def create_item_venda(self, id_venda: UUID, id_empresa: UUID, item_data: Dict[str, Any]) -> ItemVenda:
         """
-        Cria lançamentos financeiros para uma venda.
+        Adicionar item à venda.
         
         Args:
-            db: Sessão do banco de dados
-            venda: Objeto da venda
-            id_conta: ID da conta bancária
-            id_forma_pagamento: ID da forma de pagamento
+            id_venda: ID da venda
+            id_empresa: ID da empresa para verificação
+            item_data: Dados do item
             
         Returns:
-            List[Lancamento]: Lista de lançamentos criados
+            Item criado
         """
-        from app.schemas.lancamento import LancamentoCreate
-        
-        lancamento_repo = LancamentoRepository()
-        lancamentos_criados = []
-        
-        # Verificar se a venda é parcelada
-        if venda.parcelado and venda.total_parcelas and venda.total_parcelas > 1:
-            # Calcular valor de cada parcela
-            valor_parcela = venda.valor_liquido / venda.total_parcelas
+        try:
+            # Verificar se a venda existe
+            query = (
+                select(Venda)
+                .where(Venda.id_venda == id_venda)
+                .where(Venda.id_empresa == id_empresa)
+            )
             
-            # Criar um lançamento para cada parcela
-            for i in range(1, venda.total_parcelas + 1):
-                # Calcular data de vencimento (30 dias entre parcelas)
-                dias_adicionais = (i - 1) * 30
-                data_vencimento = venda.data_venda + timedelta(days=dias_adicionais)
-                
-                # Criar lançamento
-                lancamento_data = {
-                    "id_empresa": venda.id_empresa,
-                    "id_cliente": venda.id_cliente,
-                    "id_conta": id_conta,
-                    "id_forma_pagamento": id_forma_pagamento,
-                    "id_venda": venda.id_venda,
-                    "descricao": f"{venda.descricao} - Parcela {i}/{venda.total_parcelas}",
-                    "tipo": "entrada",
-                    "valor": round(valor_parcela, 2),  # Arredondar para 2 casas decimais
-                    "data_lancamento": venda.data_venda,
-                    "data_vencimento": data_vencimento,
-                    "status": "pendente",
-                    "numero_parcela": i,
-                    "total_parcelas": venda.total_parcelas
-                }
-                
-                lancamento = lancamento_repo.create(
-                    db=db, 
-                    obj_in=LancamentoCreate(**lancamento_data)
+            result = await self.session.execute(query)
+            venda = result.scalar_one_or_none()
+            
+            if not venda:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Venda não encontrada"
                 )
-                lancamentos_criados.append(lancamento)
                 
-        else:
-            # Criar um único lançamento
-            lancamento_data = {
-                "id_empresa": venda.id_empresa,
-                "id_cliente": venda.id_cliente,
-                "id_conta": id_conta,
-                "id_forma_pagamento": id_forma_pagamento,
-                "id_venda": venda.id_venda,
-                "descricao": venda.descricao,
-                "tipo": "entrada",
-                "valor": venda.valor_liquido,
-                "data_lancamento": venda.data_venda,
-                "data_vencimento": venda.data_venda,
-                "status": "pendente"
-            }
+            # Criar o item da venda
+            item_venda_data = item_data.copy()
+            item_venda_data["id_venda"] = id_venda
             
-            lancamento = lancamento_repo.create(
-                db=db, 
-                obj_in=LancamentoCreate(**lancamento_data)
+            # Criar item
+            item = ItemVenda(**item_venda_data)
+            
+            # Salvar o item
+            self.session.add(item)
+            await self.session.commit()
+            await self.session.refresh(item)
+            
+            # Recalcular valor total da venda
+            await self.recalcular_valor_venda(id_venda)
+            
+            return item
+        except HTTPException:
+            await self.session.rollback()
+            raise
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao criar item: {str(e)}"
             )
-            lancamentos_criados.append(lancamento)
+
+    async def update_item_venda(
+        self, 
+        id_venda: UUID, 
+        id_item: UUID, 
+        id_empresa: UUID, 
+        item_data: Dict[str, Any]
+    ) -> ItemVenda:
+        """
+        Atualizar item da venda.
+        
+        Args:
+            id_venda: ID da venda
+            id_item: ID do item
+            id_empresa: ID da empresa para verificação
+            item_data: Dados para atualização
             
-        return lancamentos_criados 
+        Returns:
+            Item atualizado
+        """
+        try:
+            # Verificar se a venda existe e pertence à empresa
+            query_venda = (
+                select(Venda)
+                .where(Venda.id_venda == id_venda)
+                .where(Venda.id_empresa == id_empresa)
+            )
+            
+            result_venda = await self.session.execute(query_venda)
+            venda = result_venda.scalar_one_or_none()
+            
+            if not venda:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Venda não encontrada"
+                )
+                
+            # Verificar se o item existe
+            query_item = (
+                select(ItemVenda)
+                .where(ItemVenda.id_item_venda == id_item)
+                .where(ItemVenda.id_venda == id_venda)
+            )
+            
+            result_item = await self.session.execute(query_item)
+            item = result_item.scalar_one_or_none()
+            
+            if not item:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Item não encontrado"
+                )
+                
+            # Atualizar atributos do item
+            for key, value in item_data.items():
+                if hasattr(item, key):
+                    setattr(item, key, value)
+            
+            # Salvar alterações
+            self.session.add(item)
+            await self.session.commit()
+            await self.session.refresh(item)
+            
+            # Recalcular valor total da venda
+            await self.recalcular_valor_venda(id_venda)
+            
+            return item
+        except HTTPException:
+            await self.session.rollback()
+            raise
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao atualizar item: {str(e)}"
+            )
+
+    async def delete_item_venda(self, id_venda: UUID, id_item: UUID, id_empresa: UUID) -> bool:
+        """
+        Remover item da venda.
+        
+        Args:
+            id_venda: ID da venda
+            id_item: ID do item
+            id_empresa: ID da empresa para verificação
+            
+        Returns:
+            True se removido com sucesso
+        """
+        try:
+            # Verificar se a venda existe e pertence à empresa
+            query_venda = (
+                select(Venda)
+                .where(Venda.id_venda == id_venda)
+                .where(Venda.id_empresa == id_empresa)
+            )
+            
+            result_venda = await self.session.execute(query_venda)
+            venda = result_venda.scalar_one_or_none()
+            
+            if not venda:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Venda não encontrada"
+                )
+                
+            # Verificar se o item existe
+            query_item = (
+                select(ItemVenda)
+                .where(ItemVenda.id_item_venda == id_item)
+                .where(ItemVenda.id_venda == id_venda)
+            )
+            
+            result_item = await self.session.execute(query_item)
+            item = result_item.scalar_one_or_none()
+            
+            if not item:
+                return False
+                
+            # Excluir o item
+            await self.session.delete(item)
+            await self.session.commit()
+            
+            # Recalcular valor total da venda
+            await self.recalcular_valor_venda(id_venda)
+            
+            return True
+        except HTTPException:
+            await self.session.rollback()
+            raise
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao excluir item: {str(e)}"
+            )
+
+    async def recalcular_valor_venda(self, id_venda: UUID) -> None:
+        """
+        Recalcular o valor total da venda com base em seus itens.
+        
+        Args:
+            id_venda: ID da venda
+        """
+        try:
+            # Buscar todos os itens da venda
+            query_itens = (
+                select(ItemVenda)
+                .where(ItemVenda.id_venda == id_venda)
+            )
+            
+            result_itens = await self.session.execute(query_itens)
+            itens = result_itens.scalars().all()
+            
+            # Calcular valor total
+            valor_total = sum(item.valor_unitario * item.quantidade for item in itens)
+            
+            # Buscar a venda
+            query_venda = select(Venda).where(Venda.id_venda == id_venda)
+            result_venda = await self.session.execute(query_venda)
+            venda = result_venda.scalar_one_or_none()
+            
+            if venda:
+                # Atualizar valor total
+                venda.valor_total = valor_total
+                self.session.add(venda)
+                await self.session.commit()
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao recalcular valor da venda: {str(e)}"
+            )
+
+    async def cancelar_venda(self, id_venda: UUID, id_empresa: UUID) -> Venda:
+        """
+        Cancelar uma venda.
+        
+        Args:
+            id_venda: ID da venda
+            id_empresa: ID da empresa para verificação
+            
+        Returns:
+            Venda cancelada
+        """
+        try:
+            # Verificar se a venda existe
+            query = (
+                select(Venda)
+                .where(Venda.id_venda == id_venda)
+                .where(Venda.id_empresa == id_empresa)
+            )
+            
+            result = await self.session.execute(query)
+            venda = result.scalar_one_or_none()
+            
+            if not venda:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Venda não encontrada"
+                )
+                
+            # Alterar status para cancelado
+            venda.status = "cancelado"
+            venda.data_cancelamento = datetime.now()
+            
+            # Salvar alterações
+            self.session.add(venda)
+            await self.session.commit()
+            await self.session.refresh(venda)
+            
+            return venda
+        except HTTPException:
+            await self.session.rollback()
+            raise
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao cancelar venda: {str(e)}"
+            ) 

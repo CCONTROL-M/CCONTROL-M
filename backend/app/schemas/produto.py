@@ -33,20 +33,37 @@ class ProdutoUpdate(BaseModel):
     ativo: Optional[bool] = None
 
 # Esquema para resposta
-class Produto(ProdutoBase):
+class ProdutoResponse(ProdutoBase):
     id_produto: UUID
     id_empresa: UUID
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+# Esquema para representação interna do produto no banco de dados
+class ProdutoInDB(ProdutoResponse):
+    """
+    Schema para representação interna do produto no banco de dados.
+    Mantido por motivos de compatibilidade com código existente.
+    """
+    pass
+
+# Alias para ProdutoResponse
+class Produto(ProdutoResponse):
+    """
+    Alias para ProdutoResponse.
+    Mantido por motivos de compatibilidade com código existente.
+    """
+    pass
 
 # Esquema para resposta com paginação
-class ProdutosPaginados(BaseModel):
-    items: List[Produto]
+class ProdutoList(BaseModel):
+    items: List[ProdutoResponse]
     total: int
     page: int
     size: int
-    pages: int
 
 # Esquema para atualização de estoque
 class EstoqueUpdate(BaseModel):

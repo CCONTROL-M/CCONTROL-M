@@ -1,53 +1,41 @@
-"""Módulo de routers da aplicação."""
+"""APIs e rotas do sistema CCONTROL-M."""
 from fastapi import APIRouter
 
 from app.routers import (
     auth,
     usuarios,
     empresas,
+    categorias,
     clientes,
+    fornecedores,
+    centro_custos,
     produtos,
-    formas_pagamento,
-    contas_bancarias,
-    logs_sistema,
+    lancamentos,
     vendas,
     parcelas,
-    lancamentos
+    permissoes,
 )
 
+# Importar o novo router de clientes com validação avançada
+from app.routers import clientes_router
 
-# Router principal da API
-router = APIRouter()
+# Router principal que agrega todas as rotas da API
+api_router = APIRouter()
 
-# Incluir router de autenticação
-router.include_router(auth.router)
+# Incluir as rotas específicas
+api_router.include_router(auth.router)
+api_router.include_router(usuarios.router)
+api_router.include_router(empresas.router)
+api_router.include_router(categorias.router)
 
-# Incluir router de usuários
-router.include_router(usuarios.router)
+# Substituir o router de clientes original pelo router com validação avançada
+# api_router.include_router(clientes.router)  # Comentado para usar a nova versão
+api_router.include_router(clientes_router.router)
 
-# Incluir router de empresas
-router.include_router(empresas.router)
-
-# Incluir router de clientes
-router.include_router(clientes.router)
-
-# Incluir router de produtos
-router.include_router(produtos.router)
-
-# Incluir router de formas de pagamento
-router.include_router(formas_pagamento.router)
-
-# Incluir router de contas bancárias
-router.include_router(contas_bancarias.router)
-
-# Incluir router de logs do sistema
-router.include_router(logs_sistema.router)
-
-# Incluir router de vendas
-router.include_router(vendas.router)
-
-# Incluir router de parcelas
-router.include_router(parcelas.router)
-
-# Incluir router de lançamentos
-router.include_router(lancamentos.router) 
+api_router.include_router(fornecedores.router)
+api_router.include_router(centro_custos.router)
+api_router.include_router(produtos.router)
+api_router.include_router(lancamentos.router)
+api_router.include_router(vendas.router)
+api_router.include_router(parcelas.router)
+api_router.include_router(permissoes.router) 

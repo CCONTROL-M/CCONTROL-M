@@ -1,13 +1,14 @@
 """Base repository para acesso ao banco de dados com suporte a multi-tenancy."""
 import logging
-from typing import Any, Dict, List, Optional, Type, TypeVar, Generic, Union, UUID
+from typing import Any, Dict, List, Optional, Type, TypeVar, Generic, Union
+from uuid import UUID
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, insert, update, delete, text
 from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel
 
-from app.db.database import get_db_session
+from app.database import db_session
 
 ModelType = TypeVar("ModelType")
 CreateSchemaType = TypeVar("CreateSchemaType", bound=BaseModel)
@@ -56,7 +57,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         Returns:
             Lista de instâncias do modelo
         """
-        async with get_db_session() as session:
+        async with db_session() as session:
             await self._set_tenant_context(session, tenant_id)
             query = select(self.model)
             result = await session.execute(query)
@@ -73,7 +74,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         Returns:
             Instância do modelo ou None se não encontrado
         """
-        async with get_db_session() as session:
+        async with db_session() as session:
             await self._set_tenant_context(session, tenant_id)
             query = select(self.model).where(self.model.id == id)
             result = await session.execute(query)
@@ -92,7 +93,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             Instância do modelo criado
         """
         try:
-            async with get_db_session() as session:
+            async with db_session() as session:
                 await self._set_tenant_context(session, tenant_id)
                 
                 # Converter schema para dicionário se necessário
@@ -130,7 +131,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             Instância do modelo atualizado ou None se não encontrado
         """
         try:
-            async with get_db_session() as session:
+            async with db_session() as session:
                 await self._set_tenant_context(session, tenant_id)
                 
                 # Converter schema para dicionário se necessário
@@ -182,7 +183,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
             True se o registro foi removido, False caso contrário
         """
         try:
-            async with get_db_session() as session:
+            async with db_session() as session:
                 await self._set_tenant_context(session, tenant_id)
                 stmt = (
                     delete(self.model)
@@ -219,7 +220,7 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         Returns:
             Número de registros
         """
-        async with get_db_session() as session:
+        async with db_session() as session:
             await self._set_tenant_context(session, tenant_id)
             query = select(self.model)
             result = await session.execute(query)

@@ -1,109 +1,127 @@
 """Schemas Pydantic para validação de dados e serialização no sistema CCONTROL-M."""
 
+# flake8: noqa
 from .usuario import (
-    UsuarioBase, 
-    UsuarioCreate, 
-    UsuarioUpdate, 
-    UsuarioInDB, 
-    Usuario, 
+    UsuarioBase,
+    UsuarioCreate,
+    UsuarioUpdate,
+    UsuarioInDB,
+    UsuarioResponse,
+    Usuario,
     UsuarioList
 )
+from .token import Token, TokenPayload
 from .empresa import (
-    EmpresaBase, 
-    EmpresaCreate, 
-    EmpresaUpdate, 
-    EmpresaInDB, 
-    Empresa, 
+    EmpresaBase,
+    EmpresaCreate,
+    EmpresaUpdate,
+    EmpresaInDB,
+    EmpresaResponse,
+    Empresa,
     EmpresaList
 )
-from .lancamento import (
-    LancamentoBase, 
-    LancamentoCreate, 
-    LancamentoUpdate, 
-    LancamentoInDB, 
-    Lancamento, 
-    LancamentoList
+from .pagination import (
+    PaginationParams,
+    PaginatedResponse,
+)
+from .fornecedor import (
+    FornecedorBase,
+    FornecedorCreate,
+    FornecedorUpdate,
+    FornecedorInDB,
+    FornecedorResponse,
+    Fornecedor,
+    FornecedorList
 )
 from .categoria import (
-    CategoriaBase, 
-    CategoriaCreate, 
-    CategoriaUpdate, 
-    CategoriaInDB, 
-    Categoria, 
+    CategoriaBase,
+    CategoriaCreate,
+    CategoriaUpdate,
+    CategoriaInDB,
+    CategoriaResponse,
+    Categoria,
     CategoriaList
 )
 from .centro_custo import (
-    CentroCustoBase, 
-    CentroCustoCreate, 
-    CentroCustoUpdate, 
-    CentroCustoInDB, 
-    CentroCusto, 
+    CentroCustoBase,
+    CentroCustoCreate,
+    CentroCustoUpdate,
+    CentroCustoInDB,
+    CentroCustoResponse,
+    CentroCusto,
     CentroCustoList
 )
+from .lancamento import (
+    LancamentoBase,
+    LancamentoCreate,
+    LancamentoUpdate,
+    LancamentoInDB,
+    Lancamento,
+    LancamentoList
+)
 from .cliente import (
-    ClienteBase, 
-    ClienteCreate, 
-    ClienteUpdate, 
-    ClienteInDB, 
-    Cliente, 
+    ClienteBase,
+    ClienteCreate,
+    ClienteUpdate,
+    ClienteInDB,
+    Cliente,
     ClienteList
 )
-from .fornecedor import (
-    FornecedorBase, 
-    FornecedorCreate, 
-    FornecedorUpdate, 
-    FornecedorInDB, 
-    Fornecedor, 
-    FornecedorList
-)
 from .conta_bancaria import (
-    ContaBancariaBase, 
-    ContaBancariaCreate, 
-    ContaBancariaUpdate, 
-    ContaBancariaInDB, 
-    ContaBancaria, 
+    ContaBancariaBase,
+    ContaBancariaCreate,
+    ContaBancariaUpdate,
+    ContaBancariaInDB,
+    ContaBancaria,
     ContaBancariaList
 )
 from .forma_pagamento import (
-    FormaPagamentoBase, 
-    FormaPagamentoCreate, 
-    FormaPagamentoUpdate, 
-    FormaPagamentoInDB, 
-    FormaPagamento, 
+    FormaPagamentoBase,
+    FormaPagamentoCreate,
+    FormaPagamentoUpdate,
+    FormaPagamentoInDB,
+    FormaPagamento,
     FormaPagamentoList
 )
-from .venda import (
-    VendaBase, 
-    VendaCreate, 
-    VendaUpdate, 
-    VendaInDB, 
-    Venda, 
-    VendaList
-)
 from .parcela import (
-    ParcelaBase, 
-    ParcelaCreate, 
-    ParcelaUpdate, 
-    ParcelaInDB, 
-    Parcela, 
+    ParcelaBase,
+    ParcelaCreate,
+    ParcelaUpdate,
+    ParcelaInDB,
+    Parcela,
     ParcelaList
 )
 from .produto import (
-    ProdutoBase, 
-    ProdutoCreate, 
-    ProdutoUpdate, 
-    ProdutoInDB, 
-    Produto
+    ProdutoBase,
+    ProdutoCreate,
+    ProdutoUpdate,
+    ProdutoInDB,
+    Produto,
+    ProdutoList
+)
+from .venda import (
+    VendaBase,
+    VendaCreate,
+    VendaUpdate,
+    VendaInDB,
+    Venda,
+    VendaList
 )
 from .log_sistema import (
-    LogSistemaBase, 
-    LogSistemaCreate, 
-    LogSistemaInDB, 
-    LogSistema, 
+    LogSistemaBase,
+    LogSistemaCreate,
+    LogSistemaInDB,
+    LogSistema,
     LogSistemaList
 )
-from .token import Token, TokenPayload
-from .pagination import PaginatedResponse
+from .permissao_usuario import (
+    PermissaoUsuarioBase,
+    PermissaoUsuarioCreate,
+    PermissaoUsuarioUpdate,
+    PermissaoUsuarioInDB,
+    PermissaoUsuario,
+    PermissaoUsuarioList
+)
 
 # Lista completa de modelos que devem ser exportados
 __all__ = [
@@ -128,7 +146,7 @@ __all__ = [
     'Parcela', 'ParcelaCreate', 'ParcelaUpdate', 'ParcelaList',
     
     # Produtos
-    'Produto', 'ProdutoCreate', 'ProdutoUpdate',
+    'ProdutoResponse', 'ProdutoCreate', 'ProdutoUpdate', 'ProdutoList',
     
     # Sistema
     'LogSistema', 'LogSistemaCreate', 'LogSistemaList',

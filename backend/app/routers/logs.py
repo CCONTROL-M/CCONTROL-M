@@ -8,11 +8,15 @@ from fastapi.security import OAuth2PasswordBearer
 
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistema, LogSistemaList
-from app.api.deps import get_current_user
+from app.dependencies import get_current_user
 
 
 logger = logging.getLogger(__name__)
-router = APIRouter()
+router = APIRouter(
+    prefix="/logs-api",
+    tags=["Logs API"],
+    responses={404: {"description": "Log não encontrado"}}
+)
 
 
 @router.get("/", response_model=LogSistemaList)

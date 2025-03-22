@@ -1,223 +1,216 @@
 '''
 Router de Clientes para o sistema CCONTROL-M.
-Implementa as operações CRUD protegidas por JWT, com filtros, paginação e uso de repositório.
+Implementa as operações CRUD protegidas por JWT, com filtros, paginação e uso de serviço.
 '''
 
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status, Query
-from sqlalchemy.orm import Session
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from uuid import UUID
-from typing import Optional
+from typing import Optional, Dict, Any, List
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.cliente import (
     Cliente, ClienteCreate, ClienteUpdate, ClienteList
 )
 from app.schemas.pagination import PaginatedResponse
-from app.repositories.cliente_repository import ClienteRepository
-from app.database import get_db
-from app.dependencies import get_current_user
+from app.services.cliente_service import ClienteService
+from app.services.log_sistema_service import LogSistemaService
 from app.schemas.token import TokenPayload
+from app.models.usuario import Usuario
+from app.dependencies import get_current_user
+from app.database import get_async_session
+from app.utils.permissions import require_permission
+from app.schemas.log_sistema import LogSistemaCreate
 
 # Configuração de logger
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/clientes", tags=["Clientes"])
+router = APIRouter(
+    prefix="/clientes",
+    tags=["Clientes"],
+    responses={404: {"description": "Cliente não encontrado"}},
+)
 
 
-@router.post("/", response_model=Cliente, status_code=status.HTTP_201_CREATED)
-def criar_cliente(
-    cliente_in: ClienteCreate,
-    db: Session = Depends(get_db),
-    token: TokenPayload = Depends(get_current_user),
-):
-    """
-    Cria um novo cliente no sistema.
-    
-    - Requer autenticação JWT
-    - O cliente é associado a uma empresa específica
-    - Verifica duplicidade de CPF/CNPJ dentro da mesma empresa
-    """
-    logger.info(f"Criando novo cliente: {cliente_in.nome} para empresa {cliente_in.id_empresa}")
-    try:
-        repo = ClienteRepository()
-        return repo.create(db, obj_in=cliente_in)
-    except HTTPException as e:
-        logger.error(f"Erro ao criar cliente: {str(e)}")
-        raise
-    except Exception as e:
-        logger.error(f"Erro não esperado ao criar cliente: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Ocorreu um erro ao criar o cliente"
-        )
-
-
-@router.get("/", response_model=PaginatedResponse[ClienteList])
-def listar_clientes(
-    db: Session = Depends(get_db),
-    token: TokenPayload = Depends(get_current_user),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    id_empresa: Optional[UUID] = Query(None, description="Filtrar por empresa"),
-    nome: Optional[str] = Query(None, description="Busca por nome"),
-    cpf_cnpj: Optional[str] = Query(None, description="Busca por CPF/CNPJ"),
+@router.get("", response_model=ClienteList)
+@require_permission("clientes", "listar")
+async def listar_clientes(
+    id_empresa: UUID,
+    skip: int = Query(0, ge=0, description="Registros para pular (paginação)"),
+    limit: int = Query(100, ge=1, le=100, description="Limite de registros por página"),
+    nome: Optional[str] = Query(None, description="Filtrar por nome do cliente"),
+    cpf_cnpj: Optional[str] = Query(None, description="Filtrar por CPF/CNPJ"),
+    ativo: Optional[bool] = Query(None, description="Filtrar por status (ativo/inativo)"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
     Lista clientes com paginação e filtros opcionais.
     
-    - Requer autenticação JWT
-    - Suporta filtro por empresa específica
-    - Suporta busca por nome ou CPF/CNPJ
-    - Retorna resultados paginados
-    """
-    logger.info(f"Listando clientes: página {page}, tamanho {page_size}")
+    - **id_empresa**: ID da empresa (obrigatório)
+    - **skip**: Quantos registros pular (para paginação)
+    - **limit**: Limite de registros por página
+    - **nome**: Filtro opcional por nome do cliente
+    - **cpf_cnpj**: Filtro opcional por CPF/CNPJ
+    - **ativo**: Filtro opcional por status (ativo/inativo)
     
-    try:
-        repo = ClienteRepository()
-        
-        # Montar filtros
-        filters = {}
-        if nome:
-            filters["nome"] = nome
-        if cpf_cnpj:
-            filters["cpf_cnpj"] = cpf_cnpj
-            
-        # Calcular offset para paginação
-        skip = (page - 1) * page_size
-        
-        # Buscar dados
-        clientes = repo.get_multi(
-            db, 
-            skip=skip, 
-            limit=page_size, 
-            id_empresa=id_empresa,
-            filters=filters
-        )
-        total = repo.get_count(
-            db, 
-            id_empresa=id_empresa,
-            filters=filters
-        )
-        
-        return PaginatedResponse.create(
-            items=clientes,
-            total=total,
-            page=page,
-            page_size=page_size
-        )
-    except Exception as e:
-        logger.error(f"Erro ao listar clientes: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Ocorreu um erro ao listar clientes"
-        )
+    Retorna lista paginada de clientes que correspondem aos filtros aplicados.
+    """
+    # Inicializar serviço e buscar clientes
+    cliente_service = ClienteService()
+    clientes, total = await cliente_service.listar_clientes(
+        id_empresa=id_empresa,
+        skip=skip,
+        limit=limit,
+        nome=nome,
+        cpf_cnpj=cpf_cnpj,
+        ativo=ativo
+    )
+    
+    # Calcular página atual
+    page = (skip // limit) + 1 if limit > 0 else 1
+    
+    # Retornar resposta paginada
+    return ClienteList(
+        items=clientes,
+        total=total,
+        page=page,
+        size=limit
+    )
 
 
 @router.get("/{id_cliente}", response_model=Cliente)
-def obter_cliente(
-    id_cliente: UUID,
-    db: Session = Depends(get_db),
-    token: TokenPayload = Depends(get_current_user),
+@require_permission("clientes", "visualizar")
+async def obter_cliente(
+    id_cliente: UUID = Path(..., description="ID do cliente"),
+    id_empresa: UUID = Query(..., description="ID da empresa"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Obtém um cliente pelo ID.
+    Busca um cliente específico pelo ID.
     
-    - Requer autenticação JWT
-    - Retorna 404 se o cliente não for encontrado
+    - **id_cliente**: ID do cliente
+    - **id_empresa**: ID da empresa para validação
+    
+    Retorna os dados detalhados do cliente.
     """
-    logger.info(f"Buscando cliente por ID: {id_cliente}")
+    # Inicializar serviço e buscar cliente
+    cliente_service = ClienteService()
+    cliente = await cliente_service.get_cliente(id_cliente, id_empresa)
     
-    try:
-        repo = ClienteRepository()
-        cliente = repo.get(db, id=id_cliente)
-        
-        if not cliente:
-            logger.warning(f"Cliente não encontrado: {id_cliente}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="Cliente não encontrado"
-            )
-            
-        return cliente
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao buscar cliente: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Ocorreu um erro ao buscar o cliente"
+    return cliente
+
+
+@router.post("", response_model=Cliente, status_code=status.HTTP_201_CREATED)
+@require_permission("clientes", "criar")
+async def criar_cliente(
+    cliente: ClienteCreate,
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
+):
+    """
+    Cria um novo cliente.
+    
+    - **cliente**: Dados do cliente a ser criado
+    
+    Retorna os dados do cliente criado.
+    """
+    # Inicializar serviços
+    cliente_service = ClienteService()
+    log_service = LogSistemaService()
+    
+    # Criar cliente
+    novo_cliente = await cliente_service.criar_cliente(cliente)
+    
+    # Registrar log
+    await log_service.registrar_log(
+        LogSistemaCreate(
+            id_usuario=current_user.sub,
+            id_empresa=cliente.id_empresa,
+            acao="cliente:criacao",
+            descricao=f"Cliente {novo_cliente.nome} (ID: {novo_cliente.id_cliente}) criado"
         )
+    )
+    
+    return novo_cliente
 
 
 @router.put("/{id_cliente}", response_model=Cliente)
-def atualizar_cliente(
+@require_permission("clientes", "editar")
+async def atualizar_cliente(
     id_cliente: UUID,
-    cliente_in: ClienteUpdate,
-    db: Session = Depends(get_db),
-    token: TokenPayload = Depends(get_current_user),
+    cliente: ClienteUpdate,
+    id_empresa: UUID = Query(..., description="ID da empresa"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Atualiza um cliente existente.
+    Atualiza dados de um cliente existente.
     
-    - Requer autenticação JWT
-    - Verifica duplicidade de CPF/CNPJ
-    - Retorna 404 se o cliente não for encontrado
+    - **id_cliente**: ID do cliente
+    - **cliente**: Dados para atualização
+    - **id_empresa**: ID da empresa para validação
+    
+    Retorna os dados atualizados do cliente.
     """
-    logger.info(f"Atualizando cliente: {id_cliente}")
+    # Inicializar serviços
+    cliente_service = ClienteService()
+    log_service = LogSistemaService()
     
-    try:
-        repo = ClienteRepository()
-        db_cliente = repo.get(db, id=id_cliente)
-        
-        if not db_cliente:
-            logger.warning(f"Cliente não encontrado: {id_cliente}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="Cliente não encontrado"
-            )
-            
-        return repo.update(db, db_obj=db_cliente, obj_in=cliente_in)
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao atualizar cliente: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Ocorreu um erro ao atualizar o cliente"
+    # Buscar cliente atual para o log
+    cliente_atual = await cliente_service.get_cliente(id_cliente, id_empresa)
+    
+    # Atualizar cliente
+    cliente_atualizado = await cliente_service.atualizar_cliente(id_cliente, cliente, id_empresa)
+    
+    # Registrar log
+    await log_service.registrar_log(
+        LogSistemaCreate(
+            id_usuario=current_user.sub,
+            id_empresa=id_empresa,
+            acao="cliente:atualizacao",
+            descricao=f"Cliente {cliente_atual.nome} (ID: {id_cliente}) atualizado"
         )
+    )
+    
+    return cliente_atualizado
 
 
-@router.delete("/{id_cliente}", response_model=Cliente)
-def deletar_cliente(
+@router.delete("/{id_cliente}", status_code=status.HTTP_200_OK)
+@require_permission("clientes", "deletar")
+async def remover_cliente(
     id_cliente: UUID,
-    db: Session = Depends(get_db),
-    token: TokenPayload = Depends(get_current_user),
+    id_empresa: UUID = Query(..., description="ID da empresa"),
+    current_user: TokenPayload = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session),
 ):
     """
-    Remove um cliente do sistema.
+    Remove um cliente.
     
-    - Requer autenticação JWT
-    - Retorna 404 se o cliente não for encontrado
+    - **id_cliente**: ID do cliente
+    - **id_empresa**: ID da empresa para validação
+    
+    Retorna mensagem de confirmação.
     """
-    logger.info(f"Removendo cliente: {id_cliente}")
+    # Inicializar serviços
+    cliente_service = ClienteService()
+    log_service = LogSistemaService()
     
-    try:
-        repo = ClienteRepository()
-        cliente = repo.delete(db, id=id_cliente)
-        
-        if not cliente:
-            logger.warning(f"Cliente não encontrado para remoção: {id_cliente}")
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, 
-                detail="Cliente não encontrado"
-            )
-            
-        return cliente
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao remover cliente: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Ocorreu um erro ao remover o cliente"
-        ) 
+    # Buscar cliente para o log antes de remover
+    cliente = await cliente_service.get_cliente(id_cliente, id_empresa)
+    
+    # Remover cliente
+    resultado = await cliente_service.remover_cliente(id_cliente, id_empresa)
+    
+    # Registrar log
+    await log_service.registrar_log(
+        LogSistemaCreate(
+            id_usuario=current_user.sub,
+            id_empresa=id_empresa,
+            acao="cliente:exclusao",
+            descricao=f"Cliente {cliente.nome} (ID: {id_cliente}) removido"
+        )
+    )
+    
+    return resultado 

@@ -2,23 +2,22 @@
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import func
-from sqlalchemy.orm import mapped_column, Mapped
-from sqlalchemy.ext.declarative import declared_attr
+from sqlalchemy.orm import mapped_column, Mapped, declared_attr
 
 
 class TimestampedModel:
     """
-    Mixin para adicionar campos de timestamp (created_at e updated_at) aos modelos.
+    Classe base para adicionar colunas de timestamp a modelos.
     
-    Esta classe deve ser herdada por todos os modelos que precisam desses campos.
+    Utilizada como mixin para adicionar campos created_at e updated_at automaticamente
+    mantidos pelo SQLAlchemy.
     """
     
-    @declared_attr
-    def created_at(cls) -> Mapped[Optional[datetime]]:
-        """Data e hora de criação do registro."""
-        return mapped_column(default=func.now(), nullable=True)
-    
-    @declared_attr
-    def updated_at(cls) -> Mapped[Optional[datetime]]:
-        """Data e hora da última atualização do registro."""
-        return mapped_column(default=func.now(), onupdate=func.now(), nullable=True) 
+    created_at: Mapped[datetime] = mapped_column(
+        default=func.now(),
+        nullable=False
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        onupdate=func.now(),
+        nullable=True
+    ) 

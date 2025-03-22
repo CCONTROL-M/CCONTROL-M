@@ -1,0 +1,106 @@
+name: Deploy CCONTROL-M
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.7.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          
+      - name: Add server to known hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H ${{ secrets.SERVER_IP }} >> ~/.ssh/known_hosts
+
+      - name: Set up environment variables
+        run: |
+          echo "POSTGRES_USER=${{ secrets.POSTGRES_USER }}" >> .env
+          echo "POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}" >> .env
+          echo "POSTGRES_DB=ccontrolm_prod" >> .env
+          echo "REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}" >> .env
+      
+      - name: Transfer files to server
+        run: |
+          rsync -avz --delete \
+            --exclude '.git/' \
+            --exclude '.github/' \
+            --exclude 'node_modules/' \
+            --exclude '__pycache__/' \
+            --exclude '.pytest_cache/' \
+            --exclude '*.pyc' \
+            --exclude '*.pyo' \
+            --exclude '*.pyd' \
+            --exclude '.DS_Store' \
+            --exclude '.env.dev' \
+            --exclude '.env.test' \
+            . ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_IP }}:/opt/ccontrol-m
+          
+      - name: Deploy application
+        uses: appleboy/ssh-action@master
+        with:
+          host: ${{ secrets.SERVER_IP }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            cd /opt/ccontrol-m
+            echo "Configurando variáveis de ambiente de produção..."
+            # Atualizar SECRET_KEY de forma segura
+            sed -i "s/SUBSTITUA_POR_UMA_CHAVE_FORTE_GERADA_COM_COMANDO_OPENSSL/$(openssl rand -hex 32)/g" backend/.env.prod
+            
+            # Atualizar senhas de banco de dados
+            sed -i "s/usuario:senha@host:5432/{{ secrets.POSTGRES_USER }}:{{ secrets.POSTGRES_PASSWORD }}@postgres:5432/g" backend/.env.prod
+            
+            # Criar diretórios necessários
+            mkdir -p nginx/ssl nginx/logs nginx/conf
+            
+            # Verificar se já existem certificados SSL
+            if [ ! -d "nginx/ssl/live" ]; then
+              echo "Certificados SSL não encontrados. Configure manualmente ou use Let's Encrypt."
+            fi
+            
+            echo "Parando containers existentes..."
+            docker-compose -f docker-compose.prod.yml down
+            
+            echo "Removendo imagens antigas..."
+            docker image prune -af
+            
+            echo "Construindo e iniciando novos containers..."
+            docker-compose -f docker-compose.prod.yml up -d --build
+            
+            echo "Executando migrações do banco de dados..."
+            docker-compose -f docker-compose.prod.yml exec -T backend alembic upgrade head
+            
+            echo "Verificando status dos containers..."
+            docker-compose -f docker-compose.prod.yml ps
+            
+            echo "Verificando logs do backend..."
+            docker-compose -f docker-compose.prod.yml logs --tail=50 backend
+            
+            echo "Deploy concluído com sucesso!"
+      
+      - name: Send deployment notification
+        uses: appleboy/telegram-action@v0.1.1
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            🚀 *Deploy concluído para CCONTROL-M*
+            
+            Branch: ${{ github.ref_name }}
+            Commit: ${{ github.sha }}
+            Autor: ${{ github.actor }}
+            
+            Visite https://ccontrol-m.seudominio.com.br para acessar o sistema. 

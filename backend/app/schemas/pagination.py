@@ -1,33 +1,32 @@
-"""Esquemas para paginação de resultados."""
-from typing import Generic, List, TypeVar, Optional, Any
-from pydantic import BaseModel, Field
+"""Schemas para paginação de resultados."""
+from typing import Generic, List, TypeVar
+from fastapi import Query, Depends
+from pydantic import BaseModel
 
-from app.config.settings import settings
-
+# Definir tipo genérico para os itens
 T = TypeVar('T')
 
 
-class Pagination(BaseModel):
-    """Parâmetros de paginação para consultas."""
-    
-    page: Optional[int] = Field(1, ge=1, description="Número da página")
-    page_size: Optional[int] = Field(
-        settings.DEFAULT_PAGE_SIZE, 
-        ge=1, 
-        le=settings.MAX_PAGE_SIZE,
-        description="Itens por página"
-    )
-    
+class PaginationParams:
+    """Parâmetros de paginação para ser usado como dependência."""
+    def __init__(
+        self,
+        page: int = Query(1, ge=1, description="Número da página"),
+        size: int = Query(20, ge=1, le=100, description="Itens por página"),
+    ):
+        self.page = page
+        self.size = size
+        self.skip = (page - 1) * size
+        self.limit = size
+
 
 class PaginatedResponse(BaseModel, Generic[T]):
-    """Resposta paginada genérica para endpoints que retornam listas."""
-    
+    """Resposta paginada genérica."""
     items: List[T]
     total: int
     page: int
-    page_size: int
-    pages: int
-    
+    size: int
+
     @classmethod
     def create(cls, items: List[T], total: int, page: int, page_size: int) -> "PaginatedResponse[T]":
         """
@@ -48,6 +47,5 @@ class PaginatedResponse(BaseModel, Generic[T]):
             items=items,
             total=total,
             page=page,
-            page_size=page_size,
-            pages=pages
+            size=page_size,
         ) 

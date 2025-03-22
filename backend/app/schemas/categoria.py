@@ -1,59 +1,59 @@
-"""Schema para validação e serialização de categorias no sistema CCONTROL-M."""
+"""
+Schemas para manipulação de categorias.
+"""
+from typing import List, Optional
 from uuid import UUID
-from typing import Optional, List, Dict, Any
-from pydantic import BaseModel
 from datetime import datetime
-from .pagination import PaginatedResponse
+from pydantic import BaseModel, Field, RootModel
 
 
 class CategoriaBase(BaseModel):
     """Schema base para categorias."""
-    nome: str
-    tipo: str
-    descricao: Optional[str] = None
-    cor: Optional[str] = None
+    descricao: str = Field(..., min_length=2, max_length=100, examples=["Alimentação"])
+    ativo: Optional[bool] = Field(True, description="Indica se a categoria está ativa")
 
 
 class CategoriaCreate(CategoriaBase):
     """Schema para criação de categorias."""
-    id_empresa: UUID
-    subcategorias: Optional[List[Dict[str, Any]]] = None
+    pass
 
 
 class CategoriaUpdate(BaseModel):
-    """Schema para atualização parcial de categorias."""
-    nome: Optional[str] = None
-    tipo: Optional[str] = None
-    descricao: Optional[str] = None
-    cor: Optional[str] = None
-    ativo: Optional[bool] = None
-    subcategorias: Optional[List[Dict[str, Any]]] = None
-
-
-class CategoriaInDB(CategoriaBase):
-    """Schema para representação de categorias no banco de dados."""
-    id_categoria: UUID
-    id_empresa: UUID
-    ativo: bool = True
-    created_at: datetime
-    updated_at: Optional[datetime] = None
-    subcategorias: Optional[List[Dict[str, Any]]] = None
-
-    class Config:
-        from_attributes = True
-
-
-class Categoria(CategoriaInDB):
-    """Schema para representação de categorias nas respostas da API."""
+    """Schema para atualização de categorias."""
+    descricao: Optional[str] = Field(None, min_length=2, max_length=100, examples=["Alimentação"])
+    ativo: Optional[bool] = Field(None, description="Indica se a categoria está ativa")
     
     class Config:
         from_attributes = True
 
 
-class CategoriaList(PaginatedResponse):
-    """Schema para listagem paginada de categorias."""
-    items: List[Categoria]
+class CategoriaResponse(CategoriaBase):
+    """Schema para resposta de categorias."""
+    id_categoria: UUID
+    id_empresa: UUID
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
 
 
-# Resolver referência circular
-Categoria.update_forward_refs() 
+class CategoriaInDB(CategoriaResponse):
+    """
+    Schema para representação interna da categoria no banco de dados.
+    Mantido por motivos de compatibilidade com código existente.
+    """
+    pass
+
+
+class Categoria(CategoriaResponse):
+    """
+    Alias para CategoriaResponse.
+    Mantido por motivos de compatibilidade com código existente.
+    """
+    pass
+
+
+class CategoriaList(RootModel):
+    """Schema para listar categorias."""
+    root: List[Categoria] 

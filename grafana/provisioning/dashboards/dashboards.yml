@@ -1,0 +1,14 @@
+apiVersion: 1
+
+providers:
+  - name: 'CCONTROL-M'
+    orgId: 1
+    folder: 'CCONTROL-M'
+    type: file
+    disableDeletion: false
+    editable: true
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: true 

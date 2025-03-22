@@ -4,6 +4,7 @@ Este middleware extrai o ID da empresa (tenant) do token JWT e o disponibiliza
 no contexto da requisição para uso pela aplicação.
 """
 import logging
+from typing import Optional
 from fastapi import Request, HTTPException
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
@@ -11,6 +12,20 @@ import jwt
 from app.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Contexto para armazenar o tenant atual durante a requisição
+context = {}
+
+
+def get_tenant_id() -> Optional[str]:
+    """
+    Retorna o ID da empresa (tenant) do contexto atual.
+    
+    Returns:
+        Optional[str]: ID da empresa ou None se não estiver no contexto
+    """
+    return context.get("tenant_id")
+
 
 class TenantMiddleware(BaseHTTPMiddleware):
     """
@@ -35,7 +50,10 @@ class TenantMiddleware(BaseHTTPMiddleware):
         Raises:
             HTTPException: Se ocorrer um erro ao processar o token
         """
-        # Adicionar contexto vazio para o tenant
+        # Limpar o contexto no início da requisição
+        context.clear()
+        
+        # Adicionar contexto vazio para o tenant na request
         request.state.tenant_id = None
         
         # Verificar se há token de autenticação
@@ -67,11 +85,22 @@ class TenantMiddleware(BaseHTTPMiddleware):
                         if empresa_id:
                             # Armazenar ID da empresa no contexto da requisição
                             request.state.tenant_id = empresa_id
+                            # Armazenar também no contexto global para uso pelo get_tenant_id()
+                            context["tenant_id"] = empresa_id
                             logger.debug(f"Requisição para empresa ID: {empresa_id}")
                         else:
                             logger.warning("Token JWT não contém ID da empresa nos metadados")
                     else:
                         logger.warning("Token JWT não contém metadados do usuário")
+                        
+                    # Extrair também informações diretas do token
+                    # Alguns tokens podem ter o empresa_id diretamente no payload
+                    if "empresa_id" in payload:
+                        empresa_id = payload.get("empresa_id")
+                        if empresa_id and not context.get("tenant_id"):
+                            context["tenant_id"] = empresa_id
+                            request.state.tenant_id = empresa_id
+                            logger.debug(f"Tenant identificado do payload: {empresa_id}")
             except jwt.PyJWTError as e:
                 logger.error(f"Erro ao decodificar token JWT: {str(e)}")
             except Exception as e:
@@ -79,4 +108,8 @@ class TenantMiddleware(BaseHTTPMiddleware):
         
         # Continuar com a cadeia de middleware/endpoint
         response = await call_next(request)
+        
+        # Limpar o contexto no final da requisição
+        context.clear()
+        
         return response 

@@ -109,5 +109,9 @@ class AtualizacaoSaldo(BaseModel):
     def validar_valor(cls, v: float) -> float:
         """Valida que o valor seja positivo."""
         if v <= 0:
-            raise ValueError("Valor da operação deve ser maior que zero")
-        return v 
+            raise ValueError("O valor deve ser maior que zero")
+        return v
+
+
+# Alias para manter compatibilidade com código existente
+ContaBancariaAtualizacaoSaldo = AtualizacaoSaldo 

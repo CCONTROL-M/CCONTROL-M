@@ -1,22 +1,37 @@
-from fastapi import FastAPI, Request, status
+from fastapi import FastAPI, Request, status, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from contextlib import asynccontextmanager
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
+import os
+import logging
+import time
+from fastapi.middleware.gzip import GZipMiddleware
 
 # Importar rotas
-from app.routers import usuarios, empresas, clientes, categorias, centro_custos, logs_sistema, vendas, parcelas, lancamentos, formas_pagamento, contas_bancarias, fornecedores, produtos
+from app.routers import api_router
 
 # Importar configurações
 from app.config.settings import settings
 
-# Importar configuração de logs e middleware
+# Importar configuração de logs
 from app.utils.logging_config import get_logger, log_with_context
-from app.middlewares.logging_middleware import RequestLoggingMiddleware
-from app.middlewares.performance_middleware import PerformanceMiddleware
+
+# Importar middlewares
+from app.middlewares.cors_middleware import setup_cors_middleware
+from app.middlewares.rate_limiter import create_rate_limiter_middleware
+from app.middlewares.audit_middleware import create_audit_middleware
+from app.middlewares.validation_middleware import create_validation_middleware
 from app.middlewares.tenant_middleware import TenantMiddleware
+from app.middlewares.performance_middleware import PerformanceMiddleware
+from app.middlewares.logging_middleware import RequestLoggingMiddleware
+from app.middlewares.https_redirect_middleware import HTTPSRedirectMiddleware
+from app.middlewares.security_middleware import create_security_middleware
+
+# Importar dependências
+from app.db.session import create_db_and_tables
 
 # Importar monitor de agendamento
 from app.scripts.schedule_monitors import start_scheduler_thread
@@ -28,7 +43,19 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Código de inicialização - executa antes de iniciar o servidor
-    log_with_context(logger, "info", "Iniciando aplicação")
+    log_with_context(logger, "info", f"Iniciando aplicação em ambiente: {settings.APP_ENV}")
+    
+    # Inicialização: criar tabelas no banco de dados se não existirem
+    await create_db_and_tables()
+    
+    # Criar diretório de uploads se não existir
+    os.makedirs(settings.UPLOAD_DIR, exist_ok=True)
+    
+    # Criar diretório de logs se não existir
+    os.makedirs("logs", exist_ok=True)
+    
+    logger.info(f"Iniciando aplicação {settings.APP_NAME} v{settings.APP_VERSION} no ambiente {settings.APP_ENV}")
+    
     yield
     # Código de encerramento - executa quando o servidor é desligado
     log_with_context(logger, "info", "Encerrando aplicação")
@@ -37,30 +64,54 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="API para o sistema CCONTROL-M: Controle Financeiro, Vendas e Gestão",
-    version="1.0.0",
+    version=settings.APP_VERSION,
     docs_url=None,
     redoc_url=None,
     openapi_url="/api/v1/openapi.json",
     lifespan=lifespan
 )
 
-# Configurar CORS
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=settings.ALLOWED_HOSTS,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Configurar middleware CORS (com configurações seguras)
+setup_cors_middleware(app)
+
+# Adicionar middleware de segurança integrado
+app.middleware("http")(create_security_middleware())
+logger.info("Middleware de segurança integrado ativado")
+
+# Redirecionar HTTP para HTTPS em produção
+if os.getenv("ENABLE_HTTPS_REDIRECT", "False").lower() == "true" and settings.APP_ENV == "production":
+    app.add_middleware(HTTPSRedirectMiddleware)
+    logger.info("Redirecionamento HTTP para HTTPS habilitado")
 
 # Adicionar middleware de multi-tenancy
 app.add_middleware(TenantMiddleware)
+logger.info("Middleware de multi-tenancy ativado")
 
 # Adicionar middleware de logging
 app.add_middleware(RequestLoggingMiddleware)
+logger.info("Middleware de logging ativado")
 
 # Adicionar middleware de performance
 app.add_middleware(PerformanceMiddleware)
+logger.info("Middleware de performance ativado")
+
+# Adicionar middleware de limitação de taxa se habilitado
+if settings.RATE_LIMIT_ENABLED:
+    app.middleware("http")(create_rate_limiter_middleware())
+    logger.info(f"Middleware de limitação de taxa ativado: {settings.RATE_LIMIT_REQUESTS} requisições por {settings.RATE_LIMIT_WINDOW}s")
+
+# Adicionar middleware de compressão Gzip
+app.add_middleware(GZipMiddleware, minimum_size=1000)
+logger.info("Middleware de compressão Gzip ativado")
+
+# Adicionar middleware de auditoria se habilitado
+if settings.ENABLE_AUDIT_LOG:
+    app.middleware("http")(create_audit_middleware())
+    logger.info("Middleware de auditoria ativado")
+
+# Adicionar middleware de validação e segurança
+app.middleware("http")(create_validation_middleware())
+logger.info("Middleware de validação e segurança ativado")
 
 # Manipulador global de exceções
 @app.exception_handler(Exception)
@@ -78,24 +129,17 @@ async def generic_exception_handler(request: Request, exc: Exception):
     )
 
 # Incluir rotas
-app.include_router(usuarios.router, prefix="/api")
-app.include_router(empresas.router, prefix="/api")
-app.include_router(clientes.router, prefix="/api")
-app.include_router(categorias.router, prefix="/api")
-app.include_router(centro_custos.router, prefix="/api")
-app.include_router(logs_sistema.router, prefix="/api")
-app.include_router(vendas.router, prefix="/api")
-app.include_router(lancamentos.router, prefix="/api")
-app.include_router(formas_pagamento.router, prefix="/api")
-app.include_router(contas_bancarias.router, prefix="/api")
-app.include_router(fornecedores.router, prefix="/api")
-app.include_router(produtos.router, prefix="/api")
+app.include_router(api_router, prefix="/api/v1")
 
 # Rota raiz
 @app.get("/", include_in_schema=False)
 async def root():
     """Rota raiz da aplicação."""
-    return {"message": f"Bem-vindo à API do {settings.PROJECT_NAME}", "version": "1.0.0"}
+    return {
+        "message": f"Bem-vindo à API do {settings.PROJECT_NAME}", 
+        "version": settings.APP_VERSION,
+        "environment": settings.APP_ENV
+    }
 
 # Armazenar a referência do scheduler thread
 scheduler_thread = None
@@ -105,8 +149,12 @@ async def health_check():
     """
     Endpoint de verificação de saúde para verificar se a API está em execução.
     """
-    logger.info("Health check executado")
-    return {"status": "ok"}
+    return {
+        "status": "ok", 
+        "environment": settings.APP_ENV,
+        "version": settings.APP_VERSION,
+        "timestamp": time.time()
+    }
 
 @app.on_event("startup")
 async def startup_event():
@@ -115,17 +163,17 @@ async def startup_event():
     """
     global scheduler_thread
     
-    logger.info("Aplicação iniciada")
+    logger.info(f"Aplicação iniciada em ambiente: {settings.APP_ENV}")
     
     # Iniciar o agendador de monitoramento em uma thread separada
     try:
-        scheduler_thread = start_scheduler_thread()
-        logger.info("Agendador de monitoramento iniciado com sucesso")
+        if settings.ENABLE_MONITORING or settings.APP_ENV == "production":
+            scheduler_thread = start_scheduler_thread()
+            logger.info("Agendador de monitoramento iniciado com sucesso")
+        else:
+            logger.info("Monitoramento desativado por configuração")
     except Exception as e:
         logger.error(f"Erro ao iniciar agendador de monitoramento: {str(e)}")
-    
-    # Registrar informações sobre o estado inicial do sistema
-    logger.info("Sistema inicializado com monitoramento de performance ativo")
 
 @app.on_event("shutdown")
 async def shutdown_event():
@@ -153,28 +201,18 @@ def custom_openapi():
         
     openapi_schema = get_openapi(
         title=settings.PROJECT_NAME,
-        version="1.0.0",
+        version=settings.APP_VERSION,
         description="""
-# Sistema CCONTROL-M: Controle Financeiro, Vendas e Gestão
-        
-O CCONTROL-M é um sistema completo para controle financeiro, gestão de vendas e administração
-empresarial, desenvolvido com arquitetura multi-tenant para suporte a múltiplas empresas.
+# CCONTROL-M: Sistema de Gestão Empresarial
 
-## Principais recursos
+Sistema modular para controle financeiro, vendas e gestão empresarial, com suporte a multi-locação.
 
-* **Multi-tenancy**: Separação completa de dados por empresa
-* **Controle Financeiro**: Lançamentos, contas bancárias, categorias, centros de custo
-* **Gestão de Vendas**: Cadastro de clientes, produtos, vendas e parcelas
-* **Gestão de Fornecedores**: Cadastro, avaliação e transações
-* **Administração**: Controle de usuários, permissões e empresas
-* **Relatórios e Dashboards**: Visualização de dados e indicadores
+## Módulos Principais
 
-## Módulos principais
-
-### Gestão de Empresas e Usuários
-- Cadastro e gerenciamento de empresas
-- Controle de usuários e permissões
-- Logs de atividades
+### Administrativo
+- Usuários e permissões
+- Empresas (multi-tenant)
+- Logs do sistema
 
 ### Financeiro
 - Lançamentos (receitas e despesas)
@@ -200,64 +238,68 @@ empresarial, desenvolvido com arquitetura multi-tenant para suporte a múltiplas
     # Adicionar tags com descrições detalhadas
     openapi_schema["tags"] = [
         {
-            "name": "auth",
+            "name": "Autenticação",
             "description": "Operações de autenticação e autorização"
         },
         {
-            "name": "empresa",
-            "description": "Gerenciamento de empresas e configurações multi-tenant"
-        },
-        {
-            "name": "usuario",
+            "name": "Usuários",
             "description": "Gerenciamento de usuários, perfis e permissões"
         },
         {
-            "name": "cliente",
+            "name": "Empresas",
+            "description": "Gerenciamento de empresas e configurações multi-tenant"
+        },
+        {
+            "name": "Clientes",
             "description": "Cadastro e gestão de clientes"
         },
         {
-            "name": "fornecedor",
+            "name": "Fornecedores",
             "description": "Cadastro e gestão de fornecedores"
         },
         {
-            "name": "centro_custo",
+            "name": "Centros de Custo",
             "description": "Controle de centros de custo para classificação de lançamentos"
         },
         {
-            "name": "categoria",
+            "name": "Categorias",
             "description": "Categorias para classificação de lançamentos financeiros"
         },
         {
-            "name": "conta_bancaria",
+            "name": "Contas Bancárias",
             "description": "Gerenciamento de contas bancárias, caixa e carteiras"
         },
         {
-            "name": "forma_pagamento",
+            "name": "Formas de Pagamento",
             "description": "Gerenciamento de formas de pagamento para vendas e compras"
         },
         {
-            "name": "lancamento",
+            "name": "Lançamentos",
             "description": "Registro e controle de lançamentos financeiros (receitas e despesas)"
         },
         {
-            "name": "venda",
+            "name": "Vendas",
             "description": "Registro e gestão de vendas"
         },
         {
-            "name": "parcela",
+            "name": "Parcelas",
             "description": "Controle de parcelas de vendas e pagamentos"
         },
         {
-            "name": "relatorio",
+            "name": "Relatórios",
             "description": "Relatórios e análises financeiras"
         },
         {
-            "name": "dashboard",
+            "name": "Dashboard",
             "description": "Painéis e indicadores de desempenho"
         },
         {
-            "name": "log",
+            "name": "Logs",
             "description": "Registro de atividades e auditoria do sistema"
+        },
+        {
+            "name": "Health",
+            "description": "Verificação de saúde da aplicação"
         }
     ]
     
@@ -281,4 +323,16 @@ app.openapi = custom_openapi
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True) 
+    
+    # Configurações específicas para execução direta
+    host = "0.0.0.0"
+    port = int(os.environ.get("PORT", 8000))
+    reload = settings.APP_ENV == "development"
+    
+    log_with_context(
+        logger, 
+        "info", 
+        f"Iniciando servidor em {host}:{port} (reload: {reload})"
+    )
+    
+    uvicorn.run("app.main:app", host=host, port=port, reload=reload) 

@@ -1,78 +1,77 @@
-"""Schemas para operações com usuários."""
-from typing import Optional, Dict, Any, List
+"""
+Schemas para manipulação de usuários.
+"""
+from typing import Optional, List, Dict, Any
 from uuid import UUID
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from datetime import datetime
+from pydantic import BaseModel, Field, EmailStr, RootModel
 
-from app.schemas.base import BaseSchema, TimestampMixin
+
+class UsuarioBase(BaseModel):
+    """Schema base para usuários."""
+    nome: str = Field(..., min_length=3, max_length=100)
+    email: EmailStr = Field(...)
+    ativo: Optional[bool] = Field(True, description="Indica se o usuário está ativo")
 
 
-class UsuarioBase(BaseSchema):
-    """Atributos base compartilhados por todos os schemas de usuário."""
-    
-    nome: str
+class UsuarioLogin(BaseModel):
+    """Schema para login de usuários."""
     email: EmailStr
-    tipo_usuario: str
-    telas_permitidas: Optional[Dict[str, Any]] = None
+    senha: str
 
 
 class UsuarioCreate(UsuarioBase):
-    """Atributos para criar um novo usuário."""
-    
-    id_empresa: UUID
-    senha: str
-    
-    @field_validator('senha')
-    def senha_must_be_strong(cls, v):
-        """Valida que a senha é forte."""
-        if len(v) < 8:
-            raise ValueError('Senha deve ter pelo menos 8 caracteres')
-        return v
+    """Schema para criação de usuários."""
+    senha: str = Field(..., min_length=6, max_length=100)
+    id_empresa: Optional[UUID] = None
+    admin: Optional[bool] = False
 
 
-class UsuarioUpdate(BaseSchema):
-    """Atributos que podem ser atualizados em um usuário."""
-    
-    nome: Optional[str] = None
+class UsuarioUpdate(BaseModel):
+    """Schema para atualização de usuários."""
+    nome: Optional[str] = Field(None, min_length=3, max_length=100)
     email: Optional[EmailStr] = None
-    tipo_usuario: Optional[str] = None
-    telas_permitidas: Optional[Dict[str, Any]] = None
-    senha: Optional[str] = None
+    senha: Optional[str] = Field(None, min_length=6, max_length=100)
+    ativo: Optional[bool] = None
+    admin: Optional[bool] = None
     
-    @field_validator('senha')
-    def senha_must_be_strong(cls, v):
-        """Valida que a senha é forte, se fornecida."""
-        if v is not None and len(v) < 8:
-            raise ValueError('Senha deve ter pelo menos 8 caracteres')
-        return v
+    class Config:
+        from_attributes = True
 
 
-class UsuarioInDB(UsuarioBase, TimestampMixin):
-    """Atributos de um usuário armazenado no banco de dados."""
-    
-    id_usuario: UUID
+class UsuarioInDB(UsuarioBase):
+    """Schema para representação interna do usuário no banco de dados."""
+    id: UUID
     id_empresa: UUID
-    senha_hash: str
-
-
-class Usuario(UsuarioBase, TimestampMixin):
-    """Atributos de um usuário retornado para o cliente."""
+    admin: bool = False
+    hashed_password: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
     
-    id_usuario: UUID
+    class Config:
+        from_attributes = True
+
+
+class UsuarioResponse(UsuarioBase):
+    """Schema para resposta de usuários."""
+    id: UUID
     id_empresa: UUID
+    admin: bool = False
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
 
 
-class UsuarioList(BaseSchema):
+class Usuario(UsuarioResponse):
+    """
+    Alias para UsuarioResponse.
+    Mantido por motivos de compatibilidade com código existente.
+    """
+    pass
+
+
+class UsuarioList(RootModel):
     """Schema para listar usuários."""
-    
-    id_usuario: UUID
-    nome: str
-    email: EmailStr
-    tipo_usuario: str
-    created_at: Optional[str] = None
-
-
-class UsuarioLogin(BaseSchema):
-    """Schema para login de usuário."""
-    
-    email: EmailStr
-    senha: str 
+    root: List[Usuario] 

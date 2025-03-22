@@ -5,13 +5,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_async_session
-from app.schemas.venda import Venda, VendaCreate, VendaUpdate, VendaWithItems
+from app.schemas.venda import Venda, VendaCreate, VendaUpdate, VendaDetalhes
 from app.schemas.usuario import Usuario
 from app.services.venda_service import VendaService
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
 from app.utils.pagination import PaginatedResponse, paginate
-from app.auth.dependencies import get_current_user, verify_permission
+from app.dependencies import get_current_user
+from app.utils.permissions import require_permission
 
 
 router = APIRouter(
@@ -22,6 +23,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=PaginatedResponse[Venda])
+@require_permission("vendas", "listar")
 async def listar_vendas(
     id_empresa: UUID,
     id_cliente: Optional[UUID] = None,
@@ -46,8 +48,6 @@ async def listar_vendas(
     - **page**: Número da página
     - **page_size**: Tamanho da página
     """
-    verify_permission(current_user, "vendas:listar", id_empresa)
-    
     venda_service = VendaService(session)
     vendas, total = await venda_service.listar_vendas(
         id_empresa=id_empresa,
@@ -63,7 +63,8 @@ async def listar_vendas(
     return paginate(vendas, total, page, page_size)
 
 
-@router.get("/{id_venda}", response_model=VendaWithItems)
+@router.get("/{id_venda}", response_model=VendaDetalhes)
+@require_permission("vendas", "visualizar")
 async def obter_venda(
     id_venda: UUID,
     id_empresa: UUID,
@@ -76,15 +77,14 @@ async def obter_venda(
     - **id_venda**: ID da venda
     - **id_empresa**: ID da empresa para verificação de acesso
     """
-    verify_permission(current_user, "vendas:visualizar", id_empresa)
-    
     venda_service = VendaService(session)
     venda = await venda_service.get_venda_completa(id_venda, id_empresa)
     
     return venda
 
 
-@router.post("", response_model=VendaWithItems, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=VendaDetalhes, status_code=status.HTTP_201_CREATED)
+@require_permission("vendas", "criar")
 async def criar_venda(
     venda: VendaCreate,
     current_user: Usuario = Depends(get_current_user),
@@ -98,8 +98,6 @@ async def criar_venda(
     - Geração de parcelas
     - Criação de lançamentos financeiros (se confirmada)
     """
-    verify_permission(current_user, "vendas:criar", venda.id_empresa)
-    
     venda_service = VendaService(session)
     log_service = LogSistemaService(session)
     
@@ -118,7 +116,8 @@ async def criar_venda(
     return nova_venda
 
 
-@router.put("/{id_venda}", response_model=VendaWithItems)
+@router.put("/{id_venda}", response_model=VendaDetalhes)
+@require_permission("vendas", "editar")
 async def atualizar_venda(
     id_venda: UUID,
     venda_update: VendaUpdate,
@@ -134,8 +133,6 @@ async def atualizar_venda(
     - **id_venda**: ID da venda
     - **id_empresa**: ID da empresa para verificação de acesso
     """
-    verify_permission(current_user, "vendas:editar", id_empresa)
-    
     venda_service = VendaService(session)
     log_service = LogSistemaService(session)
     
@@ -159,7 +156,8 @@ async def atualizar_venda(
     return venda_atualizada
 
 
-@router.post("/{id_venda}/confirmar", response_model=VendaWithItems)
+@router.post("/{id_venda}/confirmar", response_model=VendaDetalhes)
+@require_permission("vendas", "confirmar")
 async def confirmar_venda(
     id_venda: UUID,
     id_empresa: UUID,
@@ -174,8 +172,6 @@ async def confirmar_venda(
     - **id_venda**: ID da venda
     - **id_empresa**: ID da empresa para verificação de acesso
     """
-    verify_permission(current_user, "vendas:confirmar", id_empresa)
-    
     venda_service = VendaService(session)
     log_service = LogSistemaService(session)
     
@@ -198,7 +194,8 @@ async def confirmar_venda(
     return venda_confirmada
 
 
-@router.post("/{id_venda}/cancelar", response_model=VendaWithItems)
+@router.post("/{id_venda}/cancelar", response_model=VendaDetalhes)
+@require_permission("vendas", "cancelar")
 async def cancelar_venda(
     id_venda: UUID,
     id_empresa: UUID,
@@ -213,8 +210,6 @@ async def cancelar_venda(
     - **id_venda**: ID da venda
     - **id_empresa**: ID da empresa para verificação de acesso
     """
-    verify_permission(current_user, "vendas:cancelar", id_empresa)
-    
     venda_service = VendaService(session)
     log_service = LogSistemaService(session)
     

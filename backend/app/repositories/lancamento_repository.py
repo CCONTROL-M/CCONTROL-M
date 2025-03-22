@@ -1,656 +1,373 @@
-"""Repositório para operações com lançamentos financeiros."""
-from typing import Optional, List, Dict, Any, Tuple
+"""Repositório para operações de banco de dados relacionadas a lançamentos financeiros."""
 from uuid import UUID
-from datetime import date, datetime, timedelta
-from sqlalchemy.orm import Session
-from sqlalchemy import or_, and_, func, select
+from typing import List, Optional, Dict, Any, Tuple
+from datetime import datetime, date
+
+from sqlalchemy import select, func, and_, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from fastapi import HTTPException, status
 
 from app.models.lancamento import Lancamento
 from app.models.cliente import Cliente
+from app.models.fornecedor import Fornecedor
 from app.models.conta_bancaria import ContaBancaria
 from app.models.forma_pagamento import FormaPagamento
-from app.models.parcela import Parcela
-from app.schemas.lancamento import LancamentoCreate, LancamentoUpdate, StatusLancamento, TipoLancamento
-from app.repositories.base_repository import BaseRepository
 
 
-class LancamentoRepository(BaseRepository[Lancamento, LancamentoCreate, LancamentoUpdate]):
+class LancamentoRepository:
     """Repositório para operações com lançamentos financeiros."""
-    
-    def __init__(self):
-        """Inicializa o repositório com o modelo Lancamento."""
-        super().__init__(Lancamento)
-    
-    def get(self, db: Session, id: UUID) -> Optional[Lancamento]:
+
+    def __init__(self, session: AsyncSession):
+        """Inicializar repositório com sessão."""
+        self.session = session
+
+    async def get_by_id(self, id_lancamento: UUID, id_empresa: Optional[UUID] = None) -> Optional[Lancamento]:
         """
-        Obtém um lançamento pelo ID.
+        Obter lançamento pelo ID.
         
         Args:
-            db: Sessão do banco de dados
-            id: ID do lançamento
+            id_lancamento: ID do lançamento
+            id_empresa: ID da empresa para verificação (opcional)
             
         Returns:
-            Lancamento: Lançamento encontrado ou None
+            Lançamento se encontrado, None caso contrário
         """
-        return db.query(Lancamento).filter(Lancamento.id_lancamento == id).first()
-    
-    def get_with_cliente_form_conta(
-        self, 
-        db: Session, 
-        id: UUID
-    ) -> Optional[Lancamento]:
-        """
-        Obtém um lançamento pelo ID com informações relacionadas de cliente, forma de pagamento e conta.
+        query = (
+            select(Lancamento)
+            .options(
+                selectinload(Lancamento.cliente),
+                selectinload(Lancamento.fornecedor),
+                selectinload(Lancamento.conta),
+                selectinload(Lancamento.forma_pagamento)
+            )
+            .where(Lancamento.id_lancamento == id_lancamento)
+        )
         
-        Args:
-            db: Sessão do banco de dados
-            id: ID do lançamento
+        if id_empresa:
+            query = query.where(Lancamento.id_empresa == id_empresa)
             
-        Returns:
-            Lancamento: Lançamento encontrado ou None
-        """
-        return db.query(Lancamento).filter(
-            Lancamento.id_lancamento == id
-        ).first()
+        result = await self.session.execute(query)
+        return result.scalar_one_or_none()
     
-    def get_by_empresa(
+    async def get_by_empresa(
         self, 
-        db: Session, 
         id_empresa: UUID,
-        tipo: Optional[str] = None,
-        status: Optional[str] = None
-    ) -> List[Lancamento]:
-        """
-        Obtém todos os lançamentos de uma empresa.
-        
-        Args:
-            db: Sessão do banco de dados
-            id_empresa: ID da empresa
-            tipo: Filtro por tipo (entrada/saída)
-            status: Filtro por status
-            
-        Returns:
-            List[Lancamento]: Lista de lançamentos da empresa
-        """
-        query = db.query(Lancamento).filter(Lancamento.id_empresa == id_empresa)
-        
-        if tipo:
-            query = query.filter(Lancamento.tipo == tipo)
-            
-        if status:
-            query = query.filter(Lancamento.status == status)
-            
-        return query.all()
-    
-    def get_multi(
-        self,
-        db: Session,
-        *,
         skip: int = 0,
         limit: int = 100,
-        id_empresa: Optional[UUID] = None,
-        id_cliente: Optional[UUID] = None,
-        id_conta: Optional[UUID] = None,
-        id_forma_pagamento: Optional[UUID] = None,
-        data_inicio: Optional[date] = None,
-        data_fim: Optional[date] = None,
         tipo: Optional[str] = None,
-        status: Optional[str] = None,
-        conciliado: Optional[bool] = None,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> List[Lancamento]:
-        """
-        Obtém múltiplos lançamentos com paginação e filtragem opcional.
-        
-        Args:
-            db: Sessão do banco de dados
-            skip: Registros para pular
-            limit: Limite de registros
-            id_empresa: Filtrar por empresa específica
-            id_cliente: Filtrar por cliente específico
-            id_conta: Filtrar por conta bancária específica
-            id_forma_pagamento: Filtrar por forma de pagamento específica
-            data_inicio: Data inicial para filtro
-            data_fim: Data final para filtro
-            tipo: Filtrar por tipo (entrada/saída)
-            status: Filtrar por status
-            conciliado: Filtrar por status de conciliação
-            filters: Filtros adicionais
-            
-        Returns:
-            List[Lancamento]: Lista de lançamentos
-        """
-        query = db.query(Lancamento)
-        
-        # Aplicar filtros principais
-        if id_empresa:
-            query = query.filter(Lancamento.id_empresa == id_empresa)
-        
-        if id_cliente:
-            query = query.filter(Lancamento.id_cliente == id_cliente)
-            
-        if id_conta:
-            query = query.filter(Lancamento.id_conta == id_conta)
-            
-        if id_forma_pagamento:
-            query = query.filter(Lancamento.id_forma_pagamento == id_forma_pagamento)
-        
-        if tipo:
-            query = query.filter(Lancamento.tipo == tipo)
-            
-        if status:
-            query = query.filter(Lancamento.status == status)
-            
-        if conciliado is not None:
-            query = query.filter(Lancamento.conciliado == conciliado)
-        
-        # Filtro por período de datas
-        if data_inicio and data_fim:
-            query = query.filter(
-                Lancamento.data_vencimento.between(data_inicio, data_fim)
-            )
-        elif data_inicio:
-            query = query.filter(Lancamento.data_vencimento >= data_inicio)
-        elif data_fim:
-            query = query.filter(Lancamento.data_vencimento <= data_fim)
-        
-        # Filtros adicionais
-        if filters:
-            # Tratamento especial para busca por descrição
-            if "descricao" in filters and filters["descricao"]:
-                termo_busca = f"%{filters['descricao']}%"
-                query = query.filter(Lancamento.descricao.ilike(termo_busca))
-                del filters["descricao"]  # Remove para não processar novamente
-            
-            # Processamento dos demais filtros
-            for field, value in filters.items():
-                if value is not None and hasattr(Lancamento, field):
-                    query = query.filter(getattr(Lancamento, field) == value)
-        
-        # Ordenação padrão por data
-        query = query.order_by(Lancamento.data_vencimento.desc())
-        
-        return query.offset(skip).limit(limit).all()
-    
-    def get_count(
-        self, 
-        db: Session, 
-        id_empresa: Optional[UUID] = None,
+        data_inicio: Optional[date] = None,
+        data_fim: Optional[date] = None,
         id_cliente: Optional[UUID] = None,
+        id_fornecedor: Optional[UUID] = None,
         id_conta: Optional[UUID] = None,
-        id_forma_pagamento: Optional[UUID] = None,
-        data_inicio: Optional[date] = None,
-        data_fim: Optional[date] = None,
-        tipo: Optional[str] = None,
-        status: Optional[str] = None,
-        conciliado: Optional[bool] = None,
-        filters: Optional[Dict[str, Any]] = None
-    ) -> int:
+        status: Optional[str] = None
+    ) -> Tuple[List[Lancamento], int]:
         """
-        Obtém a contagem total de lançamentos com filtros opcionais.
+        Listar lançamentos por empresa com filtros.
         
         Args:
-            db: Sessão do banco de dados
-            id_empresa: Filtrar por empresa específica
-            id_cliente: Filtrar por cliente específico
-            id_conta: Filtrar por conta bancária específica
-            id_forma_pagamento: Filtrar por forma de pagamento específica
-            data_inicio: Data inicial para filtro
-            data_fim: Data final para filtro
-            tipo: Filtrar por tipo (entrada/saída)
-            status: Filtrar por status
-            conciliado: Filtrar por status de conciliação
-            filters: Filtros adicionais
-            
-        Returns:
-            int: Contagem de lançamentos
-        """
-        query = db.query(Lancamento)
-        
-        # Aplicar filtros principais
-        if id_empresa:
-            query = query.filter(Lancamento.id_empresa == id_empresa)
-        
-        if id_cliente:
-            query = query.filter(Lancamento.id_cliente == id_cliente)
-            
-        if id_conta:
-            query = query.filter(Lancamento.id_conta == id_conta)
-            
-        if id_forma_pagamento:
-            query = query.filter(Lancamento.id_forma_pagamento == id_forma_pagamento)
-        
-        if tipo:
-            query = query.filter(Lancamento.tipo == tipo)
-            
-        if status:
-            query = query.filter(Lancamento.status == status)
-            
-        if conciliado is not None:
-            query = query.filter(Lancamento.conciliado == conciliado)
-        
-        # Filtro por período de datas
-        if data_inicio and data_fim:
-            query = query.filter(
-                Lancamento.data_vencimento.between(data_inicio, data_fim)
-            )
-        elif data_inicio:
-            query = query.filter(Lancamento.data_vencimento >= data_inicio)
-        elif data_fim:
-            query = query.filter(Lancamento.data_vencimento <= data_fim)
-        
-        # Filtros adicionais
-        if filters:
-            # Tratamento especial para busca por descrição
-            if "descricao" in filters and filters["descricao"]:
-                termo_busca = f"%{filters['descricao']}%"
-                query = query.filter(Lancamento.descricao.ilike(termo_busca))
-                del filters["descricao"]  # Remove para não processar novamente
-            
-            # Processamento dos demais filtros
-            for field, value in filters.items():
-                if value is not None and hasattr(Lancamento, field):
-                    query = query.filter(getattr(Lancamento, field) == value)
-        
-        return query.count()
-    
-    def get_totais(
-        self, 
-        db: Session, 
-        id_empresa: UUID,
-        data_inicio: Optional[date] = None,
-        data_fim: Optional[date] = None,
-        id_cliente: Optional[UUID] = None,
-        id_conta: Optional[UUID] = None
-    ) -> Dict[str, float]:
-        """
-        Calcula os totais de lançamentos para uma empresa.
-        
-        Args:
-            db: Sessão do banco de dados
             id_empresa: ID da empresa
-            data_inicio: Data inicial para filtro
-            data_fim: Data final para filtro
-            id_cliente: Filtrar por cliente específico
-            id_conta: Filtrar por conta bancária específica
+            skip: Registros para pular na paginação
+            limit: Máximo de registros para retornar
+            tipo: Filtrar por tipo (receita/despesa)
+            data_inicio: Filtrar por data inicial
+            data_fim: Filtrar por data final
+            id_cliente: Filtrar por cliente
+            id_fornecedor: Filtrar por fornecedor
+            id_conta: Filtrar por conta bancária
+            status: Filtrar por status
             
         Returns:
-            Dict[str, float]: Dicionário com os totais calculados
+            Lista de lançamentos e contagem total
         """
-        # Filtros base
-        filtros = [Lancamento.id_empresa == id_empresa]
+        # Consulta principal para lançamentos
+        query = (
+            select(Lancamento)
+            .options(
+                selectinload(Lancamento.cliente),
+                selectinload(Lancamento.fornecedor),
+                selectinload(Lancamento.conta),
+                selectinload(Lancamento.forma_pagamento)
+            )
+            .where(Lancamento.id_empresa == id_empresa)
+        )
         
-        # Adicionar filtros opcionais
+        # Consulta para contagem
+        count_query = (
+            select(func.count())
+            .select_from(Lancamento)
+            .where(Lancamento.id_empresa == id_empresa)
+        )
+        
+        # Aplicar filtros
+        if tipo:
+            query = query.where(Lancamento.tipo == tipo)
+            count_query = count_query.where(Lancamento.tipo == tipo)
+            
+        if data_inicio:
+            query = query.where(Lancamento.data_lancamento >= data_inicio)
+            count_query = count_query.where(Lancamento.data_lancamento >= data_inicio)
+            
+        if data_fim:
+            query = query.where(Lancamento.data_lancamento <= data_fim)
+            count_query = count_query.where(Lancamento.data_lancamento <= data_fim)
+            
         if id_cliente:
-            filtros.append(Lancamento.id_cliente == id_cliente)
+            query = query.where(Lancamento.id_cliente == id_cliente)
+            count_query = count_query.where(Lancamento.id_cliente == id_cliente)
+            
+        if id_fornecedor:
+            query = query.where(Lancamento.id_fornecedor == id_fornecedor)
+            count_query = count_query.where(Lancamento.id_fornecedor == id_fornecedor)
             
         if id_conta:
-            filtros.append(Lancamento.id_conta == id_conta)
+            query = query.where(Lancamento.id_conta == id_conta)
+            count_query = count_query.where(Lancamento.id_conta == id_conta)
+            
+        if status:
+            query = query.where(Lancamento.status == status)
+            count_query = count_query.where(Lancamento.status == status)
         
-        # Filtro por período de datas
-        if data_inicio and data_fim:
-            filtros.append(Lancamento.data_vencimento.between(data_inicio, data_fim))
-        elif data_inicio:
-            filtros.append(Lancamento.data_vencimento >= data_inicio)
-        elif data_fim:
-            filtros.append(Lancamento.data_vencimento <= data_fim)
+        # Ordenar por data mais recente
+        query = query.order_by(desc(Lancamento.data_lancamento))
         
-        # Filtros para diferentes status e tipos
-        total_entradas = db.query(func.sum(Lancamento.valor)).filter(
-            *filtros, 
-            Lancamento.tipo == "entrada",
-            Lancamento.status != "cancelado"
-        ).scalar() or 0
+        # Executar consulta de contagem
+        count_result = await self.session.execute(count_query)
+        total_count = count_result.scalar_one() or 0
         
-        total_saidas = db.query(func.sum(Lancamento.valor)).filter(
-            *filtros, 
-            Lancamento.tipo == "saida",
-            Lancamento.status != "cancelado"
-        ).scalar() or 0
+        # Aplicar paginação
+        query = query.offset(skip).limit(limit)
         
-        total_pendentes = db.query(func.sum(Lancamento.valor)).filter(
-            *filtros, 
-            Lancamento.status == "pendente"
-        ).scalar() or 0
+        # Executar consulta principal
+        result = await self.session.execute(query)
+        lancamentos = result.scalars().all()
         
-        total_pagos = db.query(func.sum(Lancamento.valor)).filter(
-            *filtros, 
-            Lancamento.status == "pago"
-        ).scalar() or 0
-        
-        total_cancelados = db.query(func.sum(Lancamento.valor)).filter(
-            *filtros, 
-            Lancamento.status == "cancelado"
-        ).scalar() or 0
-        
-        return {
-            "total_entradas": float(total_entradas),
-            "total_saidas": float(total_saidas),
-            "saldo": float(total_entradas - total_saidas),
-            "total_pendentes": float(total_pendentes),
-            "total_pagos": float(total_pagos),
-            "total_cancelados": float(total_cancelados)
-        }
+        return list(lancamentos), total_count
     
-    def create(
-        self, 
-        db: Session, 
-        *, 
-        obj_in: LancamentoCreate
-    ) -> Lancamento:
+    async def get_by_venda(self, id_venda: UUID) -> List[Lancamento]:
         """
-        Cria um novo lançamento.
+        Obter lançamentos associados a uma venda.
         
         Args:
-            db: Sessão do banco de dados
-            obj_in: Dados do lançamento
+            id_venda: ID da venda
             
         Returns:
-            Lancamento: Lançamento criado
-            
-        Raises:
-            HTTPException: Se cliente, conta ou forma de pagamento não existirem
+            Lista de lançamentos
         """
-        # Verificar se cliente existe, se fornecido
-        if obj_in.id_cliente:
-            cliente = db.query(Cliente).filter(
-                Cliente.id_cliente == obj_in.id_cliente,
-                Cliente.id_empresa == obj_in.id_empresa
-            ).first()
-            if not cliente:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Cliente não encontrado ou não pertence a esta empresa"
-                )
+        query = (
+            select(Lancamento)
+            .where(Lancamento.id_venda == id_venda)
+        )
         
-        # Verificar se conta bancária existe e pertence à empresa
-        conta = db.query(ContaBancaria).filter(
-            ContaBancaria.id_conta == obj_in.id_conta,
-            ContaBancaria.id_empresa == obj_in.id_empresa
-        ).first()
-        if not conta:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Conta bancária não encontrada ou não pertence a esta empresa"
-            )
-        
-        # Verificar se forma de pagamento existe e pertence à empresa
-        forma = db.query(FormaPagamento).filter(
-            FormaPagamento.id_forma == obj_in.id_forma_pagamento,
-            FormaPagamento.id_empresa == obj_in.id_empresa
-        ).first()
-        if not forma:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Forma de pagamento não encontrada ou não pertence a esta empresa"
-            )
-        
-        # Criar objeto de lançamento
-        lancamento_data = obj_in.dict(exclude={"parcelas"} if hasattr(obj_in, "parcelas") else {})
-        db_obj = Lancamento(**lancamento_data)
-        
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        
-        # Atualizar saldo da conta se o lançamento estiver pago
-        if db_obj.status == "pago":
-            self._atualizar_saldo_conta(db, db_obj)
-        
-        return db_obj
-    
-    def update(
-        self,
-        db: Session,
-        *,
-        db_obj: Lancamento,
-        obj_in: LancamentoUpdate
-    ) -> Lancamento:
+        result = await self.session.execute(query)
+        return list(result.scalars().all())
+
+    async def create(self, lancamento_data: Dict[str, Any]) -> Lancamento:
         """
-        Atualiza um lançamento existente.
+        Criar novo lançamento.
         
         Args:
-            db: Sessão do banco de dados
-            db_obj: Objeto lançamento existente
-            obj_in: Dados para atualizar
+            lancamento_data: Dados do lançamento
             
         Returns:
-            Lancamento: Lançamento atualizado
+            Lançamento criado
+        """
+        try:
+            # Criar objeto Lancamento
+            lancamento = Lancamento(**lancamento_data)
             
-        Raises:
-            HTTPException: Se cliente, conta ou forma de pagamento não existirem
-        """
-        # Guardar status e valor antigos para verificar mudanças
-        status_antigo = db_obj.status
-        conta_antiga_id = db_obj.id_conta
-        
-        # Verificar se cliente existe, se estiver sendo alterado
-        if obj_in.id_cliente is not None and obj_in.id_cliente != db_obj.id_cliente:
-            cliente = db.query(Cliente).filter(
-                Cliente.id_cliente == obj_in.id_cliente,
-                Cliente.id_empresa == db_obj.id_empresa
-            ).first()
-            if not cliente:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Cliente não encontrado ou não pertence a esta empresa"
-                )
-        
-        # Verificar se conta bancária existe, se estiver sendo alterada
-        if obj_in.id_conta is not None and obj_in.id_conta != db_obj.id_conta:
-            conta = db.query(ContaBancaria).filter(
-                ContaBancaria.id_conta == obj_in.id_conta,
-                ContaBancaria.id_empresa == db_obj.id_empresa
-            ).first()
-            if not conta:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conta bancária não encontrada ou não pertence a esta empresa"
-                )
-        
-        # Verificar se forma de pagamento existe, se estiver sendo alterada
-        if obj_in.id_forma_pagamento is not None and obj_in.id_forma_pagamento != db_obj.id_forma_pagamento:
-            forma = db.query(FormaPagamento).filter(
-                FormaPagamento.id_forma == obj_in.id_forma_pagamento,
-                FormaPagamento.id_empresa == db_obj.id_empresa
-            ).first()
-            if not forma:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Forma de pagamento não encontrada ou não pertence a esta empresa"
-                )
-        
-        # Atualizar os campos
-        update_data = obj_in.dict(exclude_unset=True)
-        
-        # Verificar consistência entre status e data de pagamento
-        if "status" in update_data and update_data["status"] == "pago" and not db_obj.data_pagamento:
-            if "data_pagamento" not in update_data or not update_data["data_pagamento"]:
-                update_data["data_pagamento"] = date.today()
-        
-        # Para cada campo no dicionário de atualização, definir no objeto do banco
-        for field, value in update_data.items():
-            setattr(db_obj, field, value)
-        
-        db.add(db_obj)
-        db.commit()
-        db.refresh(db_obj)
-        
-        # Atualizar saldo da conta se o status mudou para/de pago ou se a conta mudou
-        if (status_antigo != db_obj.status and (status_antigo == "pago" or db_obj.status == "pago")) or \
-           (db_obj.status == "pago" and conta_antiga_id != db_obj.id_conta):
-            self._atualizar_saldo_conta(db, db_obj, conta_antiga_id if conta_antiga_id != db_obj.id_conta else None)
-        
-        return db_obj
-    
-    def remove(self, db: Session, *, id: UUID) -> Lancamento:
-        """
-        Remove um lançamento.
-        
-        Args:
-            db: Sessão do banco de dados
-            id: ID do lançamento
+            # Salvar o lançamento
+            self.session.add(lancamento)
+            await self.session.commit()
+            await self.session.refresh(lancamento)
             
-        Returns:
-            Lancamento: Lançamento removido
-            
-        Raises:
-            HTTPException: Se o lançamento não for encontrado
-        """
-        lancamento = db.query(Lancamento).filter(Lancamento.id_lancamento == id).first()
-        if not lancamento:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Lançamento não encontrado"
-            )
-        
-        # Se o lançamento estiver pago, estornar o saldo da conta
-        if lancamento.status == "pago":
-            self._estornar_saldo_conta(db, lancamento)
-        
-        # Remover parcelas associadas
-        db.query(Parcela).filter(Parcela.id_lancamento == id).delete()
-        
-        db.delete(lancamento)
-        db.commit()
-        
-        return lancamento
-    
-    def cancelar(self, db: Session, *, lancamento: Lancamento) -> Lancamento:
-        """
-        Cancela um lançamento.
-        
-        Args:
-            db: Sessão do banco de dados
-            lancamento: Objeto do lançamento
-            
-        Returns:
-            Lancamento: Lançamento cancelado
-        """
-        # Se o lançamento estiver pago, estornar o saldo da conta
-        if lancamento.status == "pago":
-            self._estornar_saldo_conta(db, lancamento)
-        
-        # Alterar status para cancelado
-        lancamento.status = "cancelado"
-        lancamento.updated_at = datetime.now()
-        
-        # Cancelar parcelas associadas
-        parcelas = db.query(Parcela).filter(Parcela.id_lancamento == lancamento.id_lancamento).all()
-        for parcela in parcelas:
-            parcela.status = "cancelado"
-            parcela.updated_at = datetime.now()
-            db.add(parcela)
-        
-        db.add(lancamento)
-        db.commit()
-        db.refresh(lancamento)
-        
-        return lancamento
-    
-    def pagar(
-        self, 
-        db: Session, 
-        *, 
-        lancamento: Lancamento, 
-        data_pagamento: Optional[date] = None
-    ) -> Lancamento:
-        """
-        Marca um lançamento como pago.
-        
-        Args:
-            db: Sessão do banco de dados
-            lancamento: Objeto do lançamento
-            data_pagamento: Data de pagamento (opcional, padrão=hoje)
-            
-        Returns:
-            Lancamento: Lançamento pago
-        """
-        if lancamento.status == "pago":
             return lancamento
-        
-        if lancamento.status == "cancelado":
+        except Exception as e:
+            await self.session.rollback()
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Não é possível pagar um lançamento cancelado"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao criar lançamento: {str(e)}"
             )
-        
-        # Definir data de pagamento
-        lancamento.data_pagamento = data_pagamento or date.today()
-        lancamento.status = "pago"
-        lancamento.updated_at = datetime.now()
-        
-        db.add(lancamento)
-        db.commit()
-        db.refresh(lancamento)
-        
-        # Atualizar saldo da conta
-        self._atualizar_saldo_conta(db, lancamento)
-        
-        return lancamento
-    
-    def _atualizar_saldo_conta(
-        self, 
-        db: Session, 
-        lancamento: Lancamento, 
-        id_conta_antiga: Optional[UUID] = None
-    ) -> None:
+
+    async def update(self, id_lancamento: UUID, id_empresa: UUID, lancamento_data: Dict[str, Any]) -> Optional[Lancamento]:
         """
-        Atualiza o saldo da conta bancária com base no lançamento.
+        Atualizar lançamento existente.
         
         Args:
-            db: Sessão do banco de dados
-            lancamento: Objeto do lançamento
-            id_conta_antiga: ID da conta anterior, se houve mudança de conta
+            id_lancamento: ID do lançamento
+            id_empresa: ID da empresa para verificação
+            lancamento_data: Dados para atualização
+            
+        Returns:
+            Lançamento atualizado ou None se não encontrado
         """
-        # Se estava pago e houve mudança de conta, estornar da conta antiga
-        if id_conta_antiga:
-            conta_antiga = db.query(ContaBancaria).filter(ContaBancaria.id_conta == id_conta_antiga).first()
-            if conta_antiga:
-                if lancamento.tipo == "entrada":
-                    conta_antiga.saldo_atual -= lancamento.valor
-                else:
-                    conta_antiga.saldo_atual += lancamento.valor
-                db.add(conta_antiga)
-        
-        # Atualizar saldo da conta atual
-        conta = db.query(ContaBancaria).filter(ContaBancaria.id_conta == lancamento.id_conta).first()
-        if not conta:
-            return
-        
-        # Se foi cancelado, não alterar o saldo
-        if lancamento.status == "cancelado":
-            return
-        
-        # Se for pago e entrada, aumentar o saldo
-        if lancamento.status == "pago" and lancamento.tipo == "entrada":
-            conta.saldo_atual += lancamento.valor
-        
-        # Se for pago e saída, diminuir o saldo
-        if lancamento.status == "pago" and lancamento.tipo == "saida":
-            conta.saldo_atual -= lancamento.valor
-        
-        db.add(conta)
-        db.commit()
-    
-    def _estornar_saldo_conta(self, db: Session, lancamento: Lancamento) -> None:
+        try:
+            # Verificar se o lançamento existe
+            query = (
+                select(Lancamento)
+                .where(Lancamento.id_lancamento == id_lancamento)
+                .where(Lancamento.id_empresa == id_empresa)
+            )
+            
+            result = await self.session.execute(query)
+            lancamento = result.scalar_one_or_none()
+            
+            if not lancamento:
+                return None
+                
+            # Atualizar atributos
+            for key, value in lancamento_data.items():
+                if hasattr(lancamento, key):
+                    setattr(lancamento, key, value)
+            
+            # Salvar alterações
+            self.session.add(lancamento)
+            await self.session.commit()
+            await self.session.refresh(lancamento)
+            
+            return lancamento
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao atualizar lançamento: {str(e)}"
+            )
+
+    async def delete(self, id_lancamento: UUID, id_empresa: UUID) -> bool:
         """
-        Estorna o valor do lançamento do saldo da conta.
+        Excluir lançamento pelo ID.
         
         Args:
-            db: Sessão do banco de dados
-            lancamento: Objeto do lançamento
+            id_lancamento: ID do lançamento
+            id_empresa: ID da empresa para verificação
+            
+        Returns:
+            True se removido com sucesso
         """
-        conta = db.query(ContaBancaria).filter(ContaBancaria.id_conta == lancamento.id_conta).first()
-        if not conta:
-            return
+        try:
+            # Verificar se o lançamento existe
+            query = (
+                select(Lancamento)
+                .where(Lancamento.id_lancamento == id_lancamento)
+                .where(Lancamento.id_empresa == id_empresa)
+            )
+            
+            result = await self.session.execute(query)
+            lancamento = result.scalar_one_or_none()
+            
+            if not lancamento:
+                return False
+                
+            # Excluir o lançamento
+            await self.session.delete(lancamento)
+            await self.session.commit()
+            
+            return True
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao excluir lançamento: {str(e)}"
+            )
+            
+    async def efetivar_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> Optional[Lancamento]:
+        """
+        Efetivar um lançamento (alterar status de pendente para efetivado).
         
-        # Estornar conforme o tipo
-        if lancamento.tipo == "entrada":
-            conta.saldo_atual -= lancamento.valor
-        else:
-            conta.saldo_atual += lancamento.valor
+        Args:
+            id_lancamento: ID do lançamento
+            id_empresa: ID da empresa para verificação
+            
+        Returns:
+            Lançamento efetivado ou None se não encontrado
+        """
+        try:
+            # Verificar se o lançamento existe
+            query = (
+                select(Lancamento)
+                .where(Lancamento.id_lancamento == id_lancamento)
+                .where(Lancamento.id_empresa == id_empresa)
+            )
+            
+            result = await self.session.execute(query)
+            lancamento = result.scalar_one_or_none()
+            
+            if not lancamento:
+                return None
+            
+            # Verificar se o lançamento já está efetivado ou cancelado
+            if lancamento.status == "efetivado":
+                return lancamento
+                
+            if lancamento.status == "cancelado":
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Não é possível efetivar um lançamento cancelado"
+                )
+            
+            # Atualizar status para efetivado
+            lancamento.status = "efetivado"
+            lancamento.data_efetivacao = datetime.now()
+            
+            # Salvar alterações
+            self.session.add(lancamento)
+            await self.session.commit()
+            await self.session.refresh(lancamento)
+            
+            return lancamento
+        except HTTPException:
+            await self.session.rollback()
+            raise
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao efetivar lançamento: {str(e)}"
+            )
+            
+    async def cancelar_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> Optional[Lancamento]:
+        """
+        Cancelar um lançamento.
         
-        db.add(conta)
-        db.commit() 
+        Args:
+            id_lancamento: ID do lançamento
+            id_empresa: ID da empresa para verificação
+            
+        Returns:
+            Lançamento cancelado ou None se não encontrado
+        """
+        try:
+            # Verificar se o lançamento existe
+            query = (
+                select(Lancamento)
+                .where(Lancamento.id_lancamento == id_lancamento)
+                .where(Lancamento.id_empresa == id_empresa)
+            )
+            
+            result = await self.session.execute(query)
+            lancamento = result.scalar_one_or_none()
+            
+            if not lancamento:
+                return None
+            
+            # Verificar se o lançamento já está cancelado
+            if lancamento.status == "cancelado":
+                return lancamento
+            
+            # Atualizar status para cancelado
+            lancamento.status = "cancelado"
+            lancamento.data_cancelamento = datetime.now()
+            
+            # Salvar alterações
+            self.session.add(lancamento)
+            await self.session.commit()
+            await self.session.refresh(lancamento)
+            
+            return lancamento
+        except Exception as e:
+            await self.session.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Erro ao cancelar lançamento: {str(e)}"
+            ) 

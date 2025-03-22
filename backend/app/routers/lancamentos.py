@@ -17,7 +17,8 @@ from app.services.lancamento_service import LancamentoService
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
 from app.utils.pagination import PaginatedResponse, paginate
-from app.auth.dependencies import get_current_user, verify_permission
+from app.auth.dependencies import get_current_user
+from app.utils.permissions import require_permission
 
 
 router = APIRouter(
@@ -28,6 +29,7 @@ router = APIRouter(
 
 
 @router.get("", response_model=PaginatedResponse[Lancamento])
+@require_permission("lancamentos", "listar")
 async def listar_lancamentos(
     id_empresa: UUID,
     tipo: Optional[str] = None,
@@ -56,8 +58,6 @@ async def listar_lancamentos(
     - **page**: Número da página
     - **page_size**: Tamanho da página
     """
-    verify_permission(current_user, "lancamentos:listar", id_empresa)
-    
     lancamento_service = LancamentoService(session)
     lancamentos, total = await lancamento_service.listar_lancamentos(
         id_empresa=id_empresa,
@@ -76,6 +76,7 @@ async def listar_lancamentos(
 
 
 @router.get("/{id_lancamento}", response_model=LancamentoWithDetalhes)
+@require_permission("lancamentos", "visualizar")
 async def obter_lancamento(
     id_lancamento: UUID,
     id_empresa: UUID,
@@ -88,8 +89,6 @@ async def obter_lancamento(
     - **id_lancamento**: ID do lançamento
     - **id_empresa**: ID da empresa para verificação de acesso
     """
-    verify_permission(current_user, "lancamentos:visualizar", id_empresa)
-    
     lancamento_service = LancamentoService(session)
     lancamento = await lancamento_service.get_lancamento_detalhes(id_lancamento, id_empresa)
     
@@ -97,6 +96,7 @@ async def obter_lancamento(
 
 
 @router.post("", response_model=LancamentoWithDetalhes, status_code=status.HTTP_201_CREATED)
+@require_permission("lancamentos", "criar")
 async def criar_lancamento(
     lancamento: LancamentoCreate,
     current_user: Usuario = Depends(get_current_user),
@@ -109,8 +109,6 @@ async def criar_lancamento(
     
     - **lancamento**: Dados do lançamento a ser criado
     """
-    verify_permission(current_user, "lancamentos:criar", lancamento.id_empresa)
-    
     lancamento_service = LancamentoService(session)
     log_service = LogSistemaService(session)
     
@@ -133,6 +131,7 @@ async def criar_lancamento(
 
 
 @router.put("/{id_lancamento}", response_model=LancamentoWithDetalhes)
+@require_permission("lancamentos", "editar")
 async def atualizar_lancamento(
     id_lancamento: UUID,
     lancamento_update: LancamentoUpdate,
@@ -149,8 +148,6 @@ async def atualizar_lancamento(
     - **id_lancamento**: ID do lançamento
     - **id_empresa**: ID da empresa para verificação de acesso
     """
-    verify_permission(current_user, "lancamentos:editar", id_empresa)
-    
     lancamento_service = LancamentoService(session)
     log_service = LogSistemaService(session)
     
@@ -175,6 +172,7 @@ async def atualizar_lancamento(
 
 
 @router.post("/{id_lancamento}/pagar", response_model=LancamentoWithDetalhes)
+@require_permission("lancamentos", "pagar")
 async def pagar_lancamento(
     id_lancamento: UUID,
     id_conta: UUID,
@@ -193,8 +191,6 @@ async def pagar_lancamento(
     - **data_pagamento**: Data do pagamento (formato YYYY-MM-DD)
     - **id_empresa**: ID da empresa para verificação de acesso
     """
-    verify_permission(current_user, "lancamentos:pagar", id_empresa)
-    
     lancamento_service = LancamentoService(session)
     log_service = LogSistemaService(session)
     
@@ -220,6 +216,7 @@ async def pagar_lancamento(
 
 
 @router.post("/{id_lancamento}/cancelar", response_model=LancamentoWithDetalhes)
+@require_permission("lancamentos", "cancelar")
 async def cancelar_lancamento(
     id_lancamento: UUID,
     id_empresa: UUID,
@@ -235,8 +232,6 @@ async def cancelar_lancamento(
     - **id_lancamento**: ID do lançamento
     - **id_empresa**: ID da empresa para verificação de acesso
     """
-    verify_permission(current_user, "lancamentos:cancelar", id_empresa)
-    
     lancamento_service = LancamentoService(session)
     log_service = LogSistemaService(session)
     
@@ -260,6 +255,7 @@ async def cancelar_lancamento(
 
 
 @router.get("/relatorio", response_model=RelatorioFinanceiro)
+@require_permission("lancamentos", "relatorios")
 async def relatorio_financeiro(
     id_empresa: UUID,
     data_inicio: str,
@@ -278,8 +274,6 @@ async def relatorio_financeiro(
     - **agrupar_por**: Como agrupar os resultados (dia, semana, mes, categoria, centro_custo)
     - **tipo**: Filtrar por tipo de lançamento (receita, despesa)
     """
-    verify_permission(current_user, "lancamentos:relatorios", id_empresa)
-    
     lancamento_service = LancamentoService(session)
     relatorio = await lancamento_service.gerar_relatorio_financeiro(
         id_empresa=id_empresa,
@@ -293,6 +287,7 @@ async def relatorio_financeiro(
 
 
 @router.get("/fluxo-caixa", response_model=dict)
+@require_permission("lancamentos", "fluxo_caixa")
 async def fluxo_caixa(
     id_empresa: UUID,
     id_conta: Optional[UUID] = None,
@@ -309,8 +304,6 @@ async def fluxo_caixa(
     - **data_inicio**: Data inicial (formato YYYY-MM-DD)
     - **data_fim**: Data final (formato YYYY-MM-DD)
     """
-    verify_permission(current_user, "lancamentos:fluxo_caixa", id_empresa)
-    
     lancamento_service = LancamentoService(session)
     fluxo = await lancamento_service.calcular_fluxo_caixa(
         id_empresa=id_empresa,
