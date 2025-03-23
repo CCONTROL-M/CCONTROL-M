@@ -184,4 +184,207 @@ Este projeto está sob a licença MIT. Veja o arquivo [LICENSE](LICENSE) para ma
 
 ![CI/CD](https://github.com/CCONTROL-M/CCONTROL-M/workflows/CI/CD/badge.svg)
 ![Tests](https://github.com/CCONTROL-M/CCONTROL-M/workflows/Tests/badge.svg)
-![Coverage](https://codecov.io/gh/CCONTROL-M/CCONTROL-M/branch/master/graph/badge.svg) 
+![Coverage](https://codecov.io/gh/CCONTROL-M/CCONTROL-M/branch/master/graph/badge.svg)
+
+## Visão Geral
+
+O CCONTROL-M é um sistema completo de controle financeiro desenvolvido para gerenciar fluxo de caixa, vendas a prazo, contas a pagar e receber, e diversos relatórios financeiros.
+
+## Estrutura do Projeto
+
+O projeto é dividido em duas partes principais:
+
+```
+CCONTROL-M/
+├── frontend/     # Aplicação React com TypeScript
+├── backend/      # API Backend com FastAPI (Python)
+├── scripts/      # Scripts auxiliares para o projeto
+└── docs/         # Documentação do projeto
+```
+
+## Tecnologias Utilizadas
+
+### Frontend
+- React
+- TypeScript
+- React Router
+- Axios para requisições HTTP
+- CSS puro para estilização
+
+### Backend
+- FastAPI (Python)
+- SQLAlchemy para ORM
+- PostgreSQL como banco de dados
+- Pydantic para validação de dados
+
+## Padrões de Desenvolvimento
+
+### Estrutura de Arquivos Frontend
+
+```
+frontend/
+├── src/
+│   ├── components/   # Componentes reutilizáveis
+│   ├── pages/        # Páginas da aplicação
+│   ├── services/     # Serviços de API
+│   ├── App.tsx       # Componente principal e rotas
+│   ├── index.css     # Estilos globais
+│   └── main.tsx      # Ponto de entrada
+```
+
+### Convenções de Nomenclatura
+
+- **Componentes**: PascalCase (ex: `Header.tsx`, `Sidebar.tsx`)
+- **Páginas**: PascalCase (ex: `Dashboard.tsx`, `VendasParcelas.tsx`)
+- **Serviços**: camelCase (ex: `api.ts`)
+- **CSS**: Classes em kebab-case (ex: `sidebar-menu-item`)
+
+### Padrão de Estilização
+
+- Classes CSS seguem a nomenclatura BEM simplificada
+- Cores, espaçamentos e tipografia são consistentes
+- Todos os componentes usam as classes CSS definidas no `index.css`
+
+## Endpoints da API
+
+### Estrutura Geral
+
+A API está disponível em `http://localhost:8000` e todos os endpoints têm o prefixo `/api/v1/`. Principais recursos:
+
+| Endpoint | Método | Descrição |
+|----------|--------|-----------|
+| `/api/v1/dashboard/resumo` | GET | Resumo dos indicadores financeiros |
+| `/api/v1/lancamentos` | GET, POST | Listar e criar lançamentos financeiros |
+| `/api/v1/vendas` | GET, POST | Listar e criar vendas |
+| `/api/v1/parcelas` | GET | Listar parcelas de vendas |
+| `/api/v1/clientes` | GET, POST | Listar e criar clientes |
+| `/api/v1/fornecedores` | GET, POST | Listar e criar fornecedores |
+| `/api/v1/contas-bancarias` | GET, POST | Listar e criar contas bancárias |
+| `/api/v1/categorias` | GET, POST | Listar e criar categorias |
+| `/api/v1/centros-custo` | GET, POST | Listar e criar centros de custo |
+| `/api/v1/empresas` | GET, POST | Listar e criar empresas |
+| `/api/v1/logs` | GET | Listar logs de auditoria |
+
+### Formato de Respostas
+
+As respostas da API seguem o formato JSON padrão. Exemplo:
+
+```json
+{
+  "id_lancamento": "uuid",
+  "descricao": "Pagamento fornecedor",
+  "valor": 1500.00,
+  "data": "2025-03-15T10:30:00Z",
+  "tipo": "saida",
+  "status": "efetivado"
+}
+```
+
+## Fluxo de Trabalho
+
+### Desenvolvimento de Nova Funcionalidade
+
+1. Verificar endpoints disponíveis na API
+2. Criar interface TypeScript para os dados
+3. Implementar componente React com estados necessários
+4. Adicionar chamadas à API usando o serviço `api`
+5. Implementar tratamento de loading e erros
+6. Estilizar seguindo o padrão visual existente
+7. Adicionar rota no `App.tsx` e link no `Sidebar.tsx`
+
+### Integração Frontend/Backend
+
+- O frontend usa Axios configurado para apontar para `http://localhost:8000`
+- Dados são validados no frontend antes de enviar para a API
+- Todas as mensagens de erro são tratadas e exibidas ao usuário
+
+## Execução do Projeto
+
+### Frontend
+```bash
+cd frontend
+npm install
+npm run dev
+```
+A aplicação estará disponível em `http://localhost:3001`.
+
+### Backend
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
+A API estará disponível em `http://localhost:8000`.
+
+## Solução de Problemas Comuns
+
+### 1. Erro de Permissão de Scripts no PowerShell
+
+**Problema**: Mensagem de erro "a execução de scripts foi desabilitada neste sistema" ao executar npm ou outros comandos.
+
+**Solução**: Execute o PowerShell como administrador e utilize o comando:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+### 2. Erro 404 em Páginas do Frontend
+
+**Problema**: Erro "Failed to load resource: the server responded with a status of a 404 (Not Found)" em alguma página.
+
+**Causas possíveis**:
+- A página está referenciada no App.tsx mas o arquivo não existe em `frontend/src/pages/`
+- A URL da API está incorreta no componente da página
+- O endpoint no backend não corresponde ao especificado no frontend
+
+**Solução**:
+1. Verifique se o arquivo da página existe na pasta `frontend/src/pages/`
+2. Certifique-se de que a chamada à API usa o formato correto: `/api/v1/[recurso]`
+3. Compare as rotas definidas em `backend/app/routers/__init__.py` com as chamadas no frontend
+
+### 3. Estrutura Correta do Diretório
+
+**Atenção**: A estrutura correta dos diretórios é:
+```
+CCONTROL-M/
+├── frontend/     # Aplicação React
+├── backend/      # API FastAPI (e não "app" como referenciado em alguns lugares)
+└── scripts/      # Scripts de inicialização e utilitários
+```
+
+Para iniciar corretamente o backend, use:
+```bash
+cd backend
+uvicorn app.main:app --reload
+```
+
+### 4. Ferramenta de Diagnóstico
+
+O projeto inclui ferramentas de diagnóstico que podem ajudar a identificar problemas:
+
+- **Script de diagnóstico**: Execute `.\diagnostico.ps1` para verificar o estado do ambiente
+- **Script de inicialização**: Execute `.\start_dev.ps1` para iniciar tanto o backend quanto o frontend
+- **Componente de debug**: Nas páginas que incluem o componente APIDebug, use o botão "Mostrar Diagnóstico" para testar a conexão com a API
+
+### 5. Problemas com CORS
+
+Se encontrar erros de CORS, verifique:
+1. Se o backend está rodando em `http://localhost:8000`
+2. Se o frontend está rodando em `http://localhost:3000` ou `http://localhost:3001`
+3. Se as configurações de CORS no backend (`backend/app/middlewares/cors_middleware.py`) incluem a origem do frontend
+
+## Principais Páginas
+
+- **Dashboard**: Resumo financeiro e indicadores
+- **Lançamentos**: Gestão de entradas e saídas
+- **Vendas & Parcelas**: Gestão de vendas parceladas
+- **Relatórios**: DRE e Fluxo de Caixa
+- **Cadastros**: Clientes, Fornecedores, Contas, etc.
+- **Administração**: Usuários, Permissões e Logs
+
+## Manutenção e Boas Práticas
+
+1. Manter consistência visual entre as páginas
+2. Reutilizar componentes sempre que possível
+3. Seguir os padrões de nomenclatura estabelecidos
+4. Documentar novas funcionalidades neste README
+5. Tratar adequadamente todos os estados (loading, erro, vazio)
+6. Testar novas funcionalidades antes de integrar 

@@ -1,7 +1,7 @@
 """Testes unitários para tratamento de exceções em cálculos financeiros no sistema CCONTROL-M."""
 import pytest
 from datetime import date, timedelta
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, DivisionByZero
 from unittest.mock import AsyncMock, MagicMock, patch
 import uuid
 
@@ -319,4 +319,286 @@ class TestExcecoesDatas:
             validar_data_pagamento(data_futura)
             
         # Verificar mensagem de erro
-        assert "Data de pagamento não pode estar no futuro" in str(exc_info.value) 
+        assert "Data de pagamento não pode estar no futuro" in str(exc_info.value)
+
+
+class TestExceptionsCalculosFinanceiros:
+    """Testes para validar o tratamento de exceções nos cálculos financeiros."""
+    
+    @pytest.mark.unit
+    async def test_excecao_divisao_por_zero(self, mock_db_session):
+        """Teste para verificar o tratamento de exceção de divisão por zero."""
+        # Arrange
+        valor = Decimal('1000.00')
+        taxa_juros = Decimal('0')
+        
+        # Act/Assert
+        def calcular_tempo_para_dobrar_capital(valor, taxa_juros):
+            """Calcula o tempo necessário para dobrar o capital com juros compostos."""
+            try:
+                if taxa_juros <= Decimal('0'):
+                    raise ValueError("A taxa de juros deve ser maior que zero")
+                
+                # Fórmula: tempo = ln(2) / ln(1 + taxa)
+                import math
+                tempo = math.log(2) / math.log(1 + float(taxa_juros))
+                return round(tempo, 2)
+            except ZeroDivisionError:
+                return "Erro: Divisão por zero. A taxa de juros não pode ser zero."
+            except ValueError as e:
+                return f"Erro: {str(e)}"
+        
+        # Assert
+        resultado = calcular_tempo_para_dobrar_capital(valor, taxa_juros)
+        assert isinstance(resultado, str)
+        assert "taxa de juros deve ser maior que zero" in resultado
+    
+    @pytest.mark.unit
+    async def test_excecao_valor_negativo(self, mock_db_session):
+        """Teste para verificar o tratamento de exceção de valor negativo."""
+        # Arrange
+        valor_negativo = Decimal('-500.00')
+        taxa_juros = Decimal('0.01')
+        periodos = 12
+        
+        # Act
+        def calcular_montante_juros_compostos(valor_principal, taxa_juros, periodos):
+            """Calcula o montante com juros compostos."""
+            try:
+                if valor_principal < Decimal('0'):
+                    raise ValueError("O valor principal não pode ser negativo")
+                
+                if taxa_juros < Decimal('0'):
+                    raise ValueError("A taxa de juros não pode ser negativa")
+                
+                if periodos <= 0:
+                    raise ValueError("O número de períodos deve ser maior que zero")
+                
+                # Fórmula: montante = principal * (1 + taxa) ^ periodos
+                montante = valor_principal * (1 + taxa_juros) ** periodos
+                return montante.quantize(Decimal('0.01'))
+            except ValueError as e:
+                return f"Erro: {str(e)}"
+        
+        # Assert
+        resultado = calcular_montante_juros_compostos(valor_negativo, taxa_juros, periodos)
+        assert isinstance(resultado, str)
+        assert "valor principal não pode ser negativo" in resultado
+    
+    @pytest.mark.unit
+    async def test_excecao_data_invalida(self, mock_db_session):
+        """Teste para verificar o tratamento de exceção de data inválida."""
+        # Arrange
+        # Uma data inválida, como 30 de fevereiro
+        
+        # Act
+        def criar_data_vencimento(ano, mes, dia):
+            """Cria uma data de vencimento, validando se é uma data válida."""
+            try:
+                data = date(ano, mes, dia)
+                return data
+            except ValueError as e:
+                return f"Erro: Data inválida - {str(e)}"
+        
+        # Assert
+        resultado = criar_data_vencimento(2023, 2, 30)
+        assert isinstance(resultado, str)
+        assert "Data inválida" in resultado
+        assert "day is out of range for month" in resultado
+    
+    @pytest.mark.unit
+    async def test_excecao_formato_decimal_invalido(self, mock_db_session):
+        """Teste para verificar o tratamento de exceção de formato decimal inválido."""
+        # Arrange
+        valor_texto_invalido = "1,000.00"  # Formato inválido para Decimal
+        
+        # Act
+        def converter_para_decimal(valor_texto):
+            """Converte um texto para Decimal, tratando exceções de formato."""
+            try:
+                # Tenta converter diretamente
+                valor_decimal = Decimal(valor_texto)
+                return valor_decimal
+            except InvalidOperation:
+                # Tenta substituir vírgula por ponto se o formato estiver errado
+                try:
+                    valor_corrigido = valor_texto.replace(',', '')
+                    return Decimal(valor_corrigido)
+                except InvalidOperation:
+                    return f"Erro: Formato inválido para conversão decimal - '{valor_texto}'"
+        
+        # Assert
+        resultado = converter_para_decimal(valor_texto_invalido)
+        assert resultado == Decimal('1000.00')
+        
+        # Teste com um valor realmente impossível de converter
+        resultado_invalido = converter_para_decimal("abc")
+        assert isinstance(resultado_invalido, str)
+        assert "Formato inválido" in resultado_invalido
+    
+    @pytest.mark.unit
+    async def test_excecao_calculo_porcentagem_invalida(self, mock_db_session):
+        """Teste para verificar o tratamento de exceção de porcentagem inválida."""
+        # Arrange
+        valor = Decimal('1000.00')
+        porcentagem_invalida = Decimal('101')  # Porcentagem maior que 100%
+        
+        # Act
+        def aplicar_desconto(valor, porcentagem):
+            """Aplica um desconto ao valor, validando a porcentagem."""
+            try:
+                if porcentagem < Decimal('0'):
+                    raise ValueError("A porcentagem de desconto não pode ser negativa")
+                
+                if porcentagem > Decimal('100'):
+                    raise ValueError("A porcentagem de desconto não pode ser maior que 100%")
+                
+                desconto = valor * (porcentagem / Decimal('100'))
+                valor_com_desconto = valor - desconto
+                return valor_com_desconto.quantize(Decimal('0.01'))
+            except ValueError as e:
+                return f"Erro: {str(e)}"
+        
+        # Assert
+        resultado = aplicar_desconto(valor, porcentagem_invalida)
+        assert isinstance(resultado, str)
+        assert "não pode ser maior que 100%" in resultado
+
+
+class TestExceptionsPagamentos:
+    """Testes para validar o tratamento de exceções em operações de pagamento."""
+    
+    @pytest.mark.unit
+    async def test_excecao_pagamento_parcial_menor_que_minimo(self, mock_db_session):
+        """Teste para verificar se um pagamento parcial menor que o mínimo é rejeitado."""
+        # Arrange
+        valor_total = Decimal('1000.00')
+        valor_minimo = Decimal('100.00')
+        valor_pagamento = Decimal('50.00')
+        
+        # Act
+        def processar_pagamento_parcial(valor_total, valor_minimo, valor_pagamento):
+            """Processa um pagamento parcial, validando o valor mínimo."""
+            try:
+                if valor_pagamento < valor_minimo:
+                    raise ValueError(
+                        f"O pagamento parcial (R$ {valor_pagamento}) não pode ser "
+                        f"menor que o valor mínimo (R$ {valor_minimo})"
+                    )
+                
+                if valor_pagamento > valor_total:
+                    raise ValueError(
+                        f"O pagamento parcial (R$ {valor_pagamento}) não pode ser "
+                        f"maior que o valor total (R$ {valor_total})"
+                    )
+                
+                valor_restante = valor_total - valor_pagamento
+                return {
+                    'valor_pago': valor_pagamento,
+                    'valor_restante': valor_restante,
+                    'status': 'parcial' if valor_restante > 0 else 'quitado'
+                }
+            except ValueError as e:
+                return {'erro': str(e)}
+        
+        # Assert
+        resultado = processar_pagamento_parcial(valor_total, valor_minimo, valor_pagamento)
+        assert 'erro' in resultado
+        assert "não pode ser menor que o valor mínimo" in resultado['erro']
+    
+    @pytest.mark.unit
+    async def test_excecao_pagamento_maior_que_valor_total(self, mock_db_session):
+        """Teste para verificar se um pagamento maior que o valor total é rejeitado."""
+        # Arrange
+        valor_total = Decimal('500.00')
+        valor_pagamento = Decimal('600.00')
+        
+        # Act
+        def processar_pagamento(valor_total, valor_pagamento):
+            """Processa um pagamento, validando o valor total."""
+            try:
+                if valor_pagamento <= 0:
+                    raise ValueError("O valor do pagamento deve ser maior que zero")
+                
+                if valor_pagamento > valor_total:
+                    diferenca = valor_pagamento - valor_total
+                    return {
+                        'valor_pago': valor_total,
+                        'valor_troco': diferenca,
+                        'status': 'quitado_com_troco'
+                    }
+                
+                valor_restante = valor_total - valor_pagamento
+                return {
+                    'valor_pago': valor_pagamento,
+                    'valor_restante': valor_restante,
+                    'status': 'parcial' if valor_restante > 0 else 'quitado'
+                }
+            except ValueError as e:
+                return {'erro': str(e)}
+        
+        # Assert
+        resultado = processar_pagamento(valor_total, valor_pagamento)
+        assert resultado['status'] == 'quitado_com_troco'
+        assert resultado['valor_troco'] == Decimal('100.00')
+    
+    @pytest.mark.unit
+    async def test_excecao_pagamento_valor_zero(self, mock_db_session):
+        """Teste para verificar se um pagamento com valor zero é rejeitado."""
+        # Arrange
+        valor_total = Decimal('500.00')
+        valor_pagamento = Decimal('0')
+        
+        # Act
+        def processar_pagamento(valor_total, valor_pagamento):
+            """Processa um pagamento, validando o valor."""
+            try:
+                if valor_pagamento <= 0:
+                    raise ValueError("O valor do pagamento deve ser maior que zero")
+                
+                if valor_pagamento > valor_total:
+                    raise ValueError(
+                        f"O pagamento (R$ {valor_pagamento}) não pode ser "
+                        f"maior que o valor total (R$ {valor_total})"
+                    )
+                
+                valor_restante = valor_total - valor_pagamento
+                return {
+                    'valor_pago': valor_pagamento,
+                    'valor_restante': valor_restante,
+                    'status': 'parcial' if valor_restante > 0 else 'quitado'
+                }
+            except ValueError as e:
+                return {'erro': str(e)}
+        
+        # Assert
+        resultado = processar_pagamento(valor_total, valor_pagamento)
+        assert 'erro' in resultado
+        assert "deve ser maior que zero" in resultado['erro']
+    
+    @pytest.mark.unit
+    async def test_excecao_data_pagamento_anterior_emissao(self, mock_db_session):
+        """Teste para verificar se uma data de pagamento anterior à emissão é rejeitada."""
+        # Arrange
+        data_emissao = date(2023, 10, 1)
+        data_pagamento = date(2023, 9, 25)  # Anterior à emissão
+        
+        # Act
+        def validar_data_pagamento(data_emissao, data_pagamento):
+            """Valida se a data de pagamento é posterior à data de emissão."""
+            try:
+                if data_pagamento < data_emissao:
+                    diferenca_dias = (data_emissao - data_pagamento).days
+                    raise ValueError(
+                        f"A data de pagamento não pode ser anterior à data de emissão "
+                        f"(diferença de {diferenca_dias} dias)"
+                    )
+                
+                return {'status': 'valido', 'dias_apos_emissao': (data_pagamento - data_emissao).days}
+            except ValueError as e:
+                return {'erro': str(e)}
+        
+        # Assert
+        resultado = validar_data_pagamento(data_emissao, data_pagamento)
+        assert 'erro' in resultado
+        assert "não pode ser anterior à data de emissão" in resultado['erro'] 

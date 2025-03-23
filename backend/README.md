@@ -1,6 +1,95 @@
 # CCONTROL-M Backend
 
-Sistema de gestão empresarial com controle financeiro, vendas e gestão multi-empresa.
+## Visão Geral
+Sistema backend para gerenciamento financeiro empresarial, com foco em controle de pagamentos, recebimentos e cálculos financeiros precisos para pequenas e médias empresas.
+
+## Estrutura de Pastas
+
+- `app/` - Código principal da aplicação
+  - `models/` - Modelos de dados SQLAlchemy
+  - `schemas/` - Schemas Pydantic para validação
+  - `api/` - Endpoints da API REST
+  - `services/` - Lógica de negócio
+  - `utils/` - Funções utilitárias
+
+- `tests/` - Testes automatizados
+  - `unit/` - Testes unitários
+  - `integration/` - Testes de integração
+
+- `migrations/` - Scripts de migração de banco de dados
+  - `rls/` - Políticas de Row Level Security
+
+- `scripts/` - Scripts auxiliares e ferramentas de administração
+
+- `docs/` - Documentação técnica
+
+## Executando Testes Financeiros
+
+Para executar todos os testes de cálculos financeiros, use o seguinte comando:
+
+```bash
+$env:TEST_MODE="integration"; python -m pytest tests/unit/calculations/ --maxfail=1 --disable-warnings --cov=app --cov-report=term-missing
+```
+
+> **Nota**: O modo de integração é necessário para garantir que os testes não sejam pulados.
+
+## Cobertura de Cálculos
+
+| Arquivo de Teste | O que Valida |
+|------------------|--------------|
+| `test_parcelas.py` | Geração de parcelas, arredondamento, pagamento antecipado e parcial |
+| `test_juros_e_multas.py` | Juros simples, juros compostos, multas e taxas variáveis |
+| `test_fluxo_caixa.py` | Projeção de saldo, análise de fluxo, balanço patrimonial |
+| `test_datas_vencimento.py` | Ajuste de datas para feriados/fins de semana, dias úteis |
+| `test_exceptions.py` | Validação de erros, exceções de pagamento, formato de dados |
+
+## Configuração de Ambiente de Teste
+
+### Variáveis de Ambiente
+
+```
+TEST_MODE=integration  # Modo de teste (unit/integration)
+TEST_DB_TYPE=sqlite    # Tipo de banco (sqlite/postgres)
+```
+
+### SQLite In-Memory
+
+Por padrão, os testes usam SQLite in-memory para facilitar os testes sem dependências externas:
+
+```python
+TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+```
+
+Para usar PostgreSQL local:
+
+```
+TEST_DB_TYPE=postgres
+TEST_POSTGRES_URL=postgresql+asyncpg://user:password@localhost:5432/testdb
+```
+
+## Políticas de Segurança (RLS)
+
+O sistema utiliza Row Level Security para isolamento de dados entre empresas.
+
+Scripts principais:
+- [`migrations/rls/empresa_policies.sql`](migrations/rls/empresa_policies.sql) - Políticas de isolamento por empresa
+- [`migrations/rls/user_policies.sql`](migrations/rls/user_policies.sql) - Políticas de acesso por usuário
+
+Para aplicar as políticas:
+
+```bash
+psql -U postgres -d ccontrol_db -f migrations/rls/empresa_policies.sql
+```
+
+## Próximos Passos
+
+- [ ] Completar migrações para PostgreSQL
+- [ ] Revisar testes restantes (rotas e serviços)
+- [ ] Ativar métricas Prometheus
+- [ ] Implementar cache para queries frequentes
+- [ ] Adicionar suporte para exportação de relatórios em PDF
+- [ ] Completar integração com serviços de pagamento
+- [ ] Refinar documentação com exemplos de uso
 
 ## Requisitos
 
@@ -270,7 +359,7 @@ TEST_MODE=integration TEST_DB_TYPE=supabase pytest -m integration
 
 2. **Para Testes de Integração:**
    - Use o marcador `@pytest.mark.integration`
-   - Para testes locais, prefira SQLite em memória (`TEST_DB_TYPE=sqlite`)
+   - Para testes locais, prefira SQLite in-memory (`TEST_DB_TYPE=sqlite`)
    - Use o fixture `db_session` para acesso ao banco
 
 3. **Dicas Gerais:**
