@@ -1,55 +1,73 @@
-import { useEffect, useState } from "react";
-import api from "../services/api";
+import React, { useEffect, useState } from 'react';
 import { FormaPagamento } from "../types";
+import { listarFormasPagamento } from "../services/formaPagamentoService";
+import { listarFormasPagamentoMock } from "../services/formaPagamentoServiceMock";
+import { useMock } from '../utils/mock';
+import Table, { TableColumn } from "../components/Table";
+import DataStateHandler from "../components/DataStateHandler";
 
 export default function FormasPagamento() {
   const [formas, setFormas] = useState<FormaPagamento[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string>("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Definição das colunas da tabela
+  const colunas: TableColumn[] = [
+    {
+      header: "Tipo",
+      accessor: "tipo"
+    },
+    {
+      header: "Taxas (%)",
+      accessor: "taxas",
+      render: (item: FormaPagamento) => `${item.taxas}%`
+    },
+    {
+      header: "Prazo",
+      accessor: "prazo"
+    }
+  ];
 
   useEffect(() => {
-    async function fetchFormas() {
-      try {
-        const response = await api.get("/formas-pagamento");
-        setFormas(response.data);
-      } catch (err) {
-        setError("Erro ao carregar as formas de pagamento.");
-      } finally {
-        setLoading(false);
-      }
-    }
     fetchFormas();
   }, []);
 
-  if (loading) return <p className="placeholder-text">Carregando...</p>;
-  if (error) return <p className="placeholder-text">{error}</p>;
+  const fetchFormas = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Usa o utilitário useMock() para determinar se deve usar mock ou dados reais
+      const data = useMock() 
+        ? await listarFormasPagamentoMock()
+        : await listarFormasPagamento();
+      
+      setFormas(data);
+    } catch (err) {
+      console.error('Erro ao carregar formas de pagamento:', err);
+      setError('Não foi possível carregar as formas de pagamento. Tente novamente mais tarde.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
     <div>
       <h1 className="page-title">Formas de Pagamento</h1>
       
-      {formas.length === 0 ? (
-        <p className="placeholder-text">Nenhuma forma de pagamento encontrada.</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Tipo</th>
-              <th>Taxas (%)</th>
-              <th>Prazo</th>
-            </tr>
-          </thead>
-          <tbody>
-            {formas.map((f) => (
-              <tr key={f.id_forma}>
-                <td>{f.tipo}</td>
-                <td>{f.taxas}%</td>
-                <td>{f.prazo}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <DataStateHandler
+        loading={loading}
+        error={error}
+        dataLength={formas.length}
+        onRetry={fetchFormas}
+        emptyMessage="Nenhuma forma de pagamento encontrada."
+      >
+        <Table
+          columns={colunas}
+          data={formas}
+          emptyMessage="Nenhuma forma de pagamento encontrada."
+        />
+      </DataStateHandler>
     </div>
   );
 } 

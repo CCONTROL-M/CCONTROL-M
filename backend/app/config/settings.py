@@ -96,9 +96,9 @@ class Settings(BaseSettings):
     PORT: int = 8000
     WORKERS: int = 4
     ENABLE_HEALTH_CHECK: bool = True
-    CORS_ALLOWED_ORIGINS: List[str] = ["*"]
-    CORS_ALLOWED_METHODS: List[str] = ["*"]
-    CORS_ALLOWED_HEADERS: List[str] = ["*"]
+    CORS_ALLOWED_ORIGINS: List[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3003", "http://127.0.0.1:3003", "http://localhost:8000", "http://localhost"]
+    CORS_ALLOWED_METHODS: List[str] = ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"]
+    CORS_ALLOWED_HEADERS: List[str] = ["Content-Type", "Authorization", "X-Requested-With", "X-Request-ID"]
     CORS_ALLOW_CREDENTIALS: bool = True
     SENTRY_DSN: str = ""
     ENABLE_HTTPS_REDIRECT: bool = False

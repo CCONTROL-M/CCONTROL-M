@@ -1,56 +1,95 @@
 import { useEffect, useState } from "react";
-import api from "../services/api";
 import { Ciclo } from "../types";
+import { obterRelatorioCicloOperacional } from "../services/relatoriosService";
 import { formatarData } from "../utils/formatters";
+import DataStateHandler from "../components/DataStateHandler";
+import Table, { TableColumn } from "../components/Table";
+import { setUseMock } from "../utils/mock";
 
 export default function CicloOperacional() {
   const [ciclos, setCiclos] = useState<Ciclo[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
 
+  // Ativa o modo mock assim que o componente for renderizado
   useEffect(() => {
-    async function fetchCiclos() {
-      try {
-        const response = await api.get("/relatorios/ciclo-operacional");
-        setCiclos(response.data);
-      } catch (err) {
-        setError("Erro ao carregar os dados.");
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchCiclos();
+    // Ativar o modo mock para garantir que a aplicação funcione sem backend
+    setUseMock(true);
+    console.log("🔧 Modo mock foi ativado forcadamente na página de Ciclo Operacional");
   }, []);
 
-  if (loading) return <p className="placeholder-text">Carregando...</p>;
-  if (error) return <p className="placeholder-text">{error}</p>;
-  if (ciclos.length === 0) return <p className="placeholder-text">Nenhum ciclo registrado.</p>;
+  // Definição das colunas da tabela
+  const colunas: TableColumn[] = [
+    {
+      header: "Cliente",
+      accessor: "cliente"
+    },
+    {
+      header: "Data do Pedido",
+      accessor: "data_pedido",
+      render: (item: Ciclo) => formatarData(item.data_pedido)
+    },
+    {
+      header: "Data do Faturamento",
+      accessor: "data_faturamento",
+      render: (item: Ciclo) => formatarData(item.data_faturamento)
+    },
+    {
+      header: "Data do Recebimento",
+      accessor: "data_recebimento",
+      render: (item: Ciclo) => formatarData(item.data_recebimento)
+    },
+    {
+      header: "Dias de Ciclo",
+      accessor: "dias_entre"
+    }
+  ];
+
+  // Efeito para carregar dados
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  // Buscar dados do ciclo operacional
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await obterRelatorioCicloOperacional();
+      setCiclos(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Erro ao carregar dados do ciclo operacional';
+      setError(errorMessage);
+      console.error("Erro ao carregar ciclo operacional:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div>
+    <div className="page-content">
       <h1 className="page-title">Ciclo Operacional</h1>
-      <table>
-        <thead>
-          <tr>
-            <th>Cliente</th>
-            <th>Data do Pedido</th>
-            <th>Data de Faturamento</th>
-            <th>Data de Recebimento</th>
-            <th>Dias entre Pedido e Recebimento</th>
-          </tr>
-        </thead>
-        <tbody>
-          {ciclos.map((ciclo, index) => (
-            <tr key={index}>
-              <td>{ciclo.cliente}</td>
-              <td>{formatarData(ciclo.data_pedido)}</td>
-              <td>{formatarData(ciclo.data_faturamento)}</td>
-              <td>{formatarData(ciclo.data_recebimento)}</td>
-              <td>{ciclo.dias_entre}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      
+      <DataStateHandler
+        loading={loading}
+        error={error}
+        dataLength={ciclos.length}
+        onRetry={fetchData}
+        emptyMessage="Nenhum dado disponível para o ciclo operacional."
+      >
+        <Table
+          columns={colunas}
+          data={ciclos}
+          emptyMessage="Nenhum dado disponível para o ciclo operacional."
+        />
+        
+        {ciclos.length > 0 && (
+          <div className="resumo-ciclo">
+            <h3>Resumo</h3>
+            <p>Ciclo médio: {Math.round(ciclos.reduce((sum, item) => sum + item.dias_entre, 0) / ciclos.length)} dias</p>
+          </div>
+        )}
+      </DataStateHandler>
     </div>
   );
 } 

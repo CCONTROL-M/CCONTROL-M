@@ -1,25 +1,25 @@
 import { useEffect, useState } from "react";
-import api from "../services/api";
 import { FluxoItem, FluxoGrupo } from "../types";
+import { obterRelatorioFluxoCaixa } from "../services/relatoriosService";
 import { formatarData, formatarMoeda } from "../utils/formatters";
+import DataStateHandler from "../components/DataStateHandler";
+import { setUseMock } from "../utils/mock";
 
 export default function FluxoCaixa() {
   const [fluxoItens, setFluxoItens] = useState<FluxoItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
 
+  // Ativa o modo mock assim que o componente for renderizado
   useEffect(() => {
-    async function fetchFluxoCaixa() {
-      try {
-        const response = await api.get("/relatorios/fluxo-caixa");
-        setFluxoItens(response.data);
-      } catch (err) {
-        setError("Erro ao carregar o fluxo de caixa.");
-      } finally {
-        setLoading(false);
-      }
-    }
-    fetchFluxoCaixa();
+    // Ativar o modo mock para garantir que a aplicação funcione sem backend
+    setUseMock(true);
+    console.log("🔧 Modo mock foi ativado forcadamente na página de Fluxo de Caixa");
+  }, []);
+
+  // Efeito para carregar dados
+  useEffect(() => {
+    fetchData();
   }, []);
 
   // Função para agrupar itens por data
@@ -46,52 +46,74 @@ export default function FluxoCaixa() {
     }));
   };
 
-  if (loading) return <p className="placeholder-text">Carregando...</p>;
-  if (error) return <p className="placeholder-text">{error}</p>;
-  if (fluxoItens.length === 0) return <p className="placeholder-text">Nenhum lançamento encontrado.</p>;
-
-  const gruposFluxo = agruparPorData(fluxoItens);
+  // Buscar dados de fluxo de caixa
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await obterRelatorioFluxoCaixa();
+      setFluxoItens(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Erro ao carregar fluxo de caixa';
+      setError(errorMessage);
+      console.error("Erro ao carregar fluxo de caixa:", err);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div>
+    <div className="page-content">
       <h1 className="page-title">Fluxo de Caixa</h1>
       
-      {gruposFluxo.map((grupo) => (
-        <div key={grupo.data} className="fluxo-grupo">
-          <h2 className="fluxo-data">{formatarData(grupo.data)}</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Tipo</th>
-                <th>Descrição</th>
-                <th>Valor</th>
-              </tr>
-            </thead>
-            <tbody>
-              {grupo.itens.map((item, index) => (
-                <tr key={index}>
-                  <td>{item.tipo === "receita" ? "Receita" : "Despesa"}</td>
-                  <td>{item.descricao}</td>
-                  <td className={item.tipo === "receita" ? "valor-positivo" : "valor-negativo"}>
-                    {formatarMoeda(Math.abs(item.valor))}
-                  </td>
-                </tr>
-              ))}
-              <tr className="total-row">
-                <td colSpan={2}>Total do dia:</td>
-                <td>
-                  {formatarMoeda(grupo.itens.reduce((acc, item) => acc + item.valor, 0))}
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      ))}
-      
-      <div className="fluxo-resumo">
-        <h3>Resumo Geral</h3>
-        <p>Total Geral: {formatarMoeda(fluxoItens.reduce((acc, item) => acc + item.valor, 0))}</p>
-      </div>
+      <DataStateHandler
+        loading={loading}
+        error={error}
+        dataLength={fluxoItens.length}
+        onRetry={fetchData}
+        emptyMessage="Nenhum lançamento encontrado."
+      >
+        {fluxoItens.length > 0 && (
+          <>
+            {agruparPorData(fluxoItens).map((grupo) => (
+              <div key={grupo.data} className="fluxo-grupo">
+                <h2 className="fluxo-data">{formatarData(grupo.data)}</h2>
+                <table className="fluxo-tabela">
+                  <thead>
+                    <tr>
+                      <th>Tipo</th>
+                      <th>Descrição</th>
+                      <th>Valor</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {grupo.itens.map((item, index) => (
+                      <tr key={index}>
+                        <td>{item.tipo === "receita" ? "Receita" : "Despesa"}</td>
+                        <td>{item.descricao}</td>
+                        <td className={item.tipo === "receita" ? "valor-positivo" : "valor-negativo"}>
+                          {formatarMoeda(Math.abs(item.valor))}
+                        </td>
+                      </tr>
+                    ))}
+                    <tr className="total-row">
+                      <td colSpan={2}>Total do dia:</td>
+                      <td>
+                        {formatarMoeda(grupo.itens.reduce((acc, item) => acc + item.valor, 0))}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ))}
+            
+            <div className="fluxo-resumo">
+              <h3>Resumo Geral</h3>
+              <p>Total Geral: {formatarMoeda(fluxoItens.reduce((acc, item) => acc + item.valor, 0))}</p>
+            </div>
+          </>
+        )}
+      </DataStateHandler>
     </div>
   );
 } 

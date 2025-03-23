@@ -1,55 +1,70 @@
 import { useEffect, useState } from "react";
-import api from "../services/api";
 import { Usuario } from "../types";
+import { listarUsuarios } from "../services/usuarioService";
 import { formatarData } from "../utils/formatters";
+import Table, { TableColumn } from "../components/Table";
+import DataStateHandler from "../components/DataStateHandler";
 
 export default function GestaoUsuarios() {
   const [usuarios, setUsuarios] = useState<Usuario[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>("");
 
-  useEffect(() => {
-    async function fetchUsuarios() {
-      try {
-        const response = await api.get("/usuarios");
-        setUsuarios(response.data);
-      } catch (err) {
-        setError("Erro ao carregar os usuários.");
-      } finally {
-        setLoading(false);
-      }
+  // Definição das colunas da tabela
+  const colunas: TableColumn[] = [
+    {
+      header: "Nome",
+      accessor: "nome"
+    },
+    {
+      header: "Email",
+      accessor: "email"
+    },
+    {
+      header: "Tipo",
+      accessor: "tipo_usuario"
+    },
+    {
+      header: "Criado em",
+      accessor: "created_at",
+      render: (usuario: Usuario) => formatarData(usuario.created_at)
     }
+  ];
+
+  useEffect(() => {
     fetchUsuarios();
   }, []);
 
-  if (loading) return <p className="placeholder-text">Carregando...</p>;
-  if (error) return <p className="placeholder-text">{error}</p>;
-
-  if (usuarios.length === 0) return <p className="placeholder-text">Nenhum usuário encontrado.</p>;
+  async function fetchUsuarios() {
+    try {
+      setLoading(true);
+      const data = await listarUsuarios();
+      setUsuarios(data);
+      setError("");
+    } catch (err) {
+      setError("Erro ao carregar os usuários.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <div>
       <h1 className="page-title">Gestão de Usuários</h1>
-      <table>
-        <thead>
-          <tr>
-            <th>Nome</th>
-            <th>Email</th>
-            <th>Tipo</th>
-            <th>Criado em</th>
-          </tr>
-        </thead>
-        <tbody>
-          {usuarios.map((u) => (
-            <tr key={u.id_usuario}>
-              <td>{u.nome}</td>
-              <td>{u.email}</td>
-              <td>{u.tipo_usuario}</td>
-              <td>{formatarData(u.created_at)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      
+      <DataStateHandler
+        loading={loading}
+        error={error}
+        dataLength={usuarios.length}
+        onRetry={fetchUsuarios}
+        emptyMessage="Nenhum usuário encontrado."
+      >
+        <Table
+          columns={colunas}
+          data={usuarios}
+          emptyMessage="Nenhum usuário encontrado."
+        />
+      </DataStateHandler>
     </div>
   );
 } 

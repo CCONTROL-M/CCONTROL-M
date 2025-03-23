@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 import os
 import logging
 import time
@@ -181,6 +182,28 @@ async def status_check():
 async def performance_metrics():
     """Endpoint para métricas de performance internas."""
     return JSONResponse(content=get_metrics_dict())
+
+# Endpoint simples para verificação de saúde (health check)
+@app.get("/api/v1/health", tags=["Health"])
+async def health_check():
+    """Endpoint para verificação de saúde da API."""
+    try:
+        # Resposta simples sem acessar banco de dados ou outros serviços
+        return {
+            "status": "ok", 
+            "message": "API está funcionando corretamente",
+            "timestamp": time.time(),
+            "version": settings.APP_VERSION,
+            "environment": settings.APP_ENV
+        }
+    except Exception as e:
+        logger.error(f"Erro no health check: {str(e)}")
+        # Mesmo em caso de erro, retornar 200 para não quebrar verificações de saúde
+        return {
+            "status": "warning",
+            "message": "API está online mas encontrou um erro",
+            "timestamp": time.time()
+        }
 
 if __name__ == "__main__":
     import uvicorn

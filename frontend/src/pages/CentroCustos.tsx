@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import api from "../services/api";
 import APIDebug from "../components/APIDebug";
 import { CentroCusto } from "../types";
+import { listarCentrosCusto } from "../services/centroCustoService";
+import Table, { TableColumn } from "../components/Table";
+import DataStateHandler from "../components/DataStateHandler";
 
 export default function CentroCustos() {
   const [centros, setCentros] = useState<CentroCusto[]>([]);
@@ -9,22 +11,31 @@ export default function CentroCustos() {
   const [error, setError] = useState<string>("");
   const [showDebug, setShowDebug] = useState<boolean>(false);
 
-  useEffect(() => {
-    async function fetchCentros() {
-      try {
-        const response = await api.get("/api/v1/centros-custo");
-        setCentros(response.data.items || response.data);
-      } catch (err) {
-        console.error("Erro ao carregar centros de custo:", err);
-        setError("Erro ao carregar os centros de custo.");
-      } finally {
-        setLoading(false);
-      }
+  // Definição das colunas da tabela
+  const colunas: TableColumn[] = [
+    {
+      header: "Nome",
+      accessor: "nome"
     }
+  ];
+
+  useEffect(() => {
     fetchCentros();
   }, []);
 
-  if (loading) return <p className="placeholder-text">Carregando...</p>;
+  async function fetchCentros() {
+    try {
+      setLoading(true);
+      const data = await listarCentrosCusto();
+      setCentros(data);
+      setError("");
+    } catch (err) {
+      console.error("Erro ao carregar centros de custo:", err);
+      setError("Erro ao carregar os centros de custo.");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   return (
     <div>
@@ -47,26 +58,19 @@ export default function CentroCustos() {
       
       {showDebug && <APIDebug />}
       
-      {error && <p className="placeholder-text error-message">{error}</p>}
-      
-      {!error && centros.length === 0 ? (
-        <p className="placeholder-text">Nenhum centro de custo encontrado.</p>
-      ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>Nome</th>
-            </tr>
-          </thead>
-          <tbody>
-            {centros.map((c) => (
-              <tr key={c.id_centro}>
-                <td>{c.nome}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
+      <DataStateHandler
+        loading={loading}
+        error={error}
+        dataLength={centros.length}
+        onRetry={fetchCentros}
+        emptyMessage="Nenhum centro de custo encontrado."
+      >
+        <Table
+          columns={colunas}
+          data={centros}
+          emptyMessage="Nenhum centro de custo encontrado."
+        />
+      </DataStateHandler>
     </div>
   );
 } 

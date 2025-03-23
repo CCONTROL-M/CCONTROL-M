@@ -1,28 +1,39 @@
-import { useEffect, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ResumoDashboard } from "../types";
 import { formatarMoeda } from "../utils/formatters";
 import { buscarResumoDashboard } from "../services/relatorioService";
+import { buscarResumoDashboardMock } from "../services/relatorioServiceMock";
+import { useMock } from '../utils/mock';
+import { useLoading } from '../contexts/LoadingContext';
 
 export default function Dashboard() {
   const [resumo, setResumo] = useState<ResumoDashboard | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+  const { setLoading } = useLoading();
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const data = await buscarResumoDashboard();
-        setResumo(data);
-      } catch (err) {
-        setError("Erro ao carregar os indicadores financeiros.");
-      } finally {
-        setLoading(false);
-      }
-    }
     fetchData();
   }, []);
 
-  if (loading) return <p className="placeholder-text">Carregando...</p>;
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      
+      // Usa o utilitário useMock() para determinar se deve usar mock ou dados reais
+      const data = useMock() 
+        ? await buscarResumoDashboardMock()
+        : await buscarResumoDashboard();
+      
+      setResumo(data);
+    } catch (err) {
+      console.error('Erro ao carregar os indicadores financeiros:', err);
+      setError('Não foi possível carregar os indicadores financeiros. Tente novamente mais tarde.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   if (error) return <p className="placeholder-text">{error}</p>;
   if (!resumo) return <p className="placeholder-text">Nenhum dado disponível.</p>;
 

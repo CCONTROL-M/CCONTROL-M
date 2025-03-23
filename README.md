@@ -388,3 +388,130 @@ Se encontrar erros de CORS, verifique:
 4. Documentar novas funcionalidades neste README
 5. Tratar adequadamente todos os estados (loading, erro, vazio)
 6. Testar novas funcionalidades antes de integrar 
+
+## Modo Mock
+
+O frontend possui um sistema de modo mock para funcionamento offline, permitindo o desenvolvimento e testes mesmo quando a API está indisponível.
+
+### Como funciona o modo mock
+
+- O sistema detecta automaticamente quando a API está offline e ativa o modo mock
+- Existe um toggle na interface para ativar/desativar o modo mock manualmente
+- Configuração via variável de ambiente: `VITE_MOCK_ENABLED=true`
+
+### Serviços com suporte a mock implementado
+
+- ✅ Clientes
+- ✅ Fornecedores
+- ✅ Vendas e Parcelas
+- ✅ Lançamentos (contas a pagar/receber)
+- ✅ Transferências entre Contas
+- ✅ Logs do sistema
+- ✅ Formas de pagamento
+- ❌ Categorias (pendente)
+- ❌ Centros de Custo (pendente)
+- ❌ Contas Bancárias (pendente)
+- ❌ Empresas (pendente)
+- ❌ Configurações (pendente)
+
+Para mais detalhes sobre o modo mock, consulte o README específico do frontend em `frontend/src/README.md`.
+
+## Iniciando o Ambiente de Desenvolvimento
+
+O CCONTROL-M possui scripts automatizados para facilitar a inicialização do ambiente de desenvolvimento completo (frontend + backend). Siga um dos métodos abaixo:
+
+### Método 1: Scripts Automáticos (Recomendado)
+
+Utilize os scripts prontos para iniciar automaticamente tanto o backend quanto o frontend em terminais separados:
+
+#### Windows PowerShell:
+```bash
+.\start_dev.ps1
+```
+
+#### Windows CMD:
+```bash
+start_dev.bat
+```
+
+Esses scripts:
+1. Encerram qualquer processo nas portas 3000 e 8000
+2. Iniciam o servidor backend (FastAPI/Uvicorn) na porta 8000
+3. Aguardam 5 segundos para o backend inicializar
+4. Iniciam o servidor frontend (Vite) na porta 3000
+5. Geram logs separados na pasta `logs/`
+
+### Método 2: Inicialização Manual
+
+Se preferir iniciar manualmente, abra dois terminais separados:
+
+#### Terminal 1 (Backend):
+```bash
+cd backend
+# Ativar ambiente virtual se necessário
+# .\venv\Scripts\activate   # Windows
+# source venv/bin/activate  # Linux/Mac
+uvicorn app.main:app --reload --port 8000
+```
+
+#### Terminal 2 (Frontend):
+```bash
+cd frontend
+npm run dev
+```
+
+### Acessando a Aplicação
+
+Após iniciar o ambiente, acesse:
+- **Frontend:** http://localhost:3000
+- **API Backend:** http://localhost:8000
+- **Documentação API:** http://localhost:8000/docs
+
+## Preparando para Produção
+
+### Backend (FastAPI)
+
+Para ambiente de produção, recomendamos usar Uvicorn com Gunicorn:
+
+```bash
+cd backend
+
+# Instalar Gunicorn (se ainda não estiver instalado)
+pip install gunicorn
+
+# Iniciar com Gunicorn (ajuste workers conforme necessário)
+gunicorn -w 4 -k uvicorn.workers.UvicornWorker app.main:app
+```
+
+### Frontend (React)
+
+Para ambiente de produção, compile o frontend e sirva com um servidor web:
+
+```bash
+cd frontend
+
+# Compilar para produção
+npm run build
+
+# Os arquivos estáticos serão gerados na pasta 'dist'
+# Sirva esses arquivos usando Nginx, Apache, Vercel, Netlify, etc.
+```
+
+Exemplo de configuração Nginx:
+```nginx
+server {
+    listen 80;
+    server_name seu-dominio.com;
+
+    location / {
+        root /caminho/para/frontend/dist;
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+``` 

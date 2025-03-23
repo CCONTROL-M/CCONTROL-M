@@ -17,6 +17,7 @@ export interface Fornecedor {
 
 export interface ContaBancaria {
   id_conta: string;
+  nome: string;
   banco: string;
   tipo: string;
   numero: string;
@@ -27,12 +28,27 @@ export interface ContaBancaria {
 
 export interface Venda {
   id_venda: string;
+  id_empresa?: string;
+  id_cliente?: string;
+  cliente?: {
+    id_cliente: string;
+    nome: string;
+    documento?: string;
+    tipo?: string;
+  };
   valor_total: number;
   numero_parcelas: number;
-  data_inicio: string;
+  data_venda?: string;
+  data_inicio?: string;
   descricao: string;
   status: string;
-  created_at: string;
+  created_at?: string;
+  id_forma_pagamento?: string;
+  forma_pagamento?: {
+    id_forma_pagamento: string;
+    nome: string;
+    tipo: string;
+  };
 }
 
 export interface Parcela {
@@ -189,4 +205,5 @@ export interface Log {
   acao: string;
   data: string;
   usuario: string;
+  detalhes: string;
 } 
