@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.database import get_async_session
 from app.schemas.venda import Venda, VendaCreate, VendaUpdate, VendaDetalhes
 from app.schemas.usuario import Usuario
-from app.services.venda_service import VendaService
+from app.services.venda import VendaService
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
 from app.utils.pagination import PaginatedResponse, paginate

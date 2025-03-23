@@ -60,6 +60,20 @@ ALTER TABLE empresa ENABLE ROW LEVEL SECURITY;
 -- Relacionamentos
 ALTER TABLE usuario_empresa ENABLE ROW LEVEL SECURITY;
 
+-- Contas a Pagar
+ALTER TABLE contas_pagar ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conta_pagar ENABLE ROW LEVEL SECURITY;
+
+-- Contas a Receber
+ALTER TABLE contas_receber ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conta_receber ENABLE ROW LEVEL SECURITY;
+
+-- Permissões
+ALTER TABLE permissoes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE permissao ENABLE ROW LEVEL SECURITY;
+ALTER TABLE permissoes_usuario ENABLE ROW LEVEL SECURITY;
+ALTER TABLE permissao_usuario ENABLE ROW LEVEL SECURITY;
+
 -- ===== CRIAR POLÍTICAS RLS - ABORDAGEM 1: USANDO app.current_tenant =====
 -- Esta abordagem usa a variável de sessão app.current_tenant para filtragem
 
@@ -135,6 +149,34 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'logs_sistema' AND policyname = 'logs_sistema_tenant_isolation_policy') THEN
         CREATE POLICY logs_sistema_tenant_isolation_policy ON logs_sistema
         USING (id_empresa = (current_setting('app.current_tenant', TRUE))::uuid);
+    END IF;
+
+    -- Contas a Pagar
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'contas_pagar' AND policyname = 'contas_pagar_tenant_isolation_policy') THEN
+        CREATE POLICY contas_pagar_tenant_isolation_policy ON contas_pagar
+        USING (empresa_id = (current_setting('app.current_tenant', TRUE))::uuid);
+    END IF;
+
+    -- Contas a Receber
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'contas_receber' AND policyname = 'contas_receber_tenant_isolation_policy') THEN
+        CREATE POLICY contas_receber_tenant_isolation_policy ON contas_receber
+        USING (id_empresa = (current_setting('app.current_tenant', TRUE))::uuid);
+    END IF;
+
+    -- Permissões
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'permissoes' AND policyname = 'permissoes_tenant_isolation_policy') THEN
+        CREATE POLICY permissoes_tenant_isolation_policy ON permissoes
+        USING (id_empresa = (current_setting('app.current_tenant', TRUE))::uuid);
+    END IF;
+
+    -- Permissões de Usuário
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'permissoes_usuario' AND policyname = 'permissoes_usuario_tenant_isolation_policy') THEN
+        CREATE POLICY permissoes_usuario_tenant_isolation_policy ON permissoes_usuario
+        USING (
+            id_usuario IN (
+                SELECT id_usuario FROM usuarios WHERE id_empresa = (current_setting('app.current_tenant', TRUE))::uuid
+            )
+        );
     END IF;
 END $$;
 
@@ -242,6 +284,45 @@ CREATE POLICY "Acesso às parcelas da empresa" ON parcela
         )
     ));
 
+-- Conta a Pagar: Acesso apenas às contas a pagar das empresas do usuário
+CREATE POLICY "Acesso às contas a pagar da empresa" ON conta_pagar
+    FOR ALL
+    USING (empresa_id IN (
+        SELECT empresa_id FROM usuario_empresa 
+        WHERE usuario_id = auth.uid()
+    ));
+
+-- Conta a Receber: Acesso apenas às contas a receber das empresas do usuário
+CREATE POLICY "Acesso às contas a receber da empresa" ON conta_receber
+    FOR ALL
+    USING (id_empresa IN (
+        SELECT empresa_id FROM usuario_empresa 
+        WHERE usuario_id = auth.uid()
+    ));
+
+-- Permissão: Acesso apenas às permissões do próprio usuário ou da empresa (para admins)
+CREATE POLICY "Acesso às permissões do usuário" ON permissao
+    FOR ALL
+    USING (
+        id_usuario = auth.uid() OR 
+        (id_empresa IN (
+            SELECT empresa_id FROM usuario_empresa 
+            WHERE usuario_id = auth.uid() AND is_admin = true
+        ))
+    );
+
+-- Permissão de Usuário: Acesso apenas às permissões do próprio usuário ou da empresa (para admins)
+CREATE POLICY "Acesso às permissões de usuário" ON permissao_usuario
+    FOR ALL
+    USING (
+        id_usuario = auth.uid() OR 
+        id_usuario IN (
+            SELECT u.id_usuario FROM usuarios u
+            JOIN usuario_empresa ue ON u.id_empresa = ue.empresa_id
+            WHERE ue.usuario_id = auth.uid() AND ue.is_admin = true
+        )
+    );
+
 -- Log de Atividade: Acesso apenas aos logs das empresas do usuário (admin)
 CREATE POLICY "Acesso aos logs da empresa" ON log_atividade
     FOR SELECT
@@ -326,6 +407,38 @@ BEGIN
     ) THEN
         CREATE INDEX idx_parcelas_id_empresa ON parcelas(id_empresa);
     END IF;
+    
+    -- Verificar e criar índice em contas_pagar.empresa_id se necessário
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes 
+        WHERE indexname = 'idx_contas_pagar_empresa_id'
+    ) THEN
+        CREATE INDEX idx_contas_pagar_empresa_id ON contas_pagar(empresa_id);
+    END IF;
+    
+    -- Verificar e criar índice em contas_receber.id_empresa se necessário
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes 
+        WHERE indexname = 'idx_contas_receber_id_empresa'
+    ) THEN
+        CREATE INDEX idx_contas_receber_id_empresa ON contas_receber(id_empresa);
+    END IF;
+    
+    -- Verificar e criar índice em permissoes.id_empresa se necessário
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes 
+        WHERE indexname = 'idx_permissoes_id_empresa'
+    ) THEN
+        CREATE INDEX idx_permissoes_id_empresa ON permissoes(id_empresa);
+    END IF;
+    
+    -- Verificar e criar índice em permissoes_usuario.id_usuario se necessário
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_indexes 
+        WHERE indexname = 'idx_permissoes_usuario_id_usuario'
+    ) THEN
+        CREATE INDEX idx_permissoes_usuario_id_usuario ON permissoes_usuario(id_usuario);
+    END IF;
 END $$;
 
 -- ===== DOCUMENTAÇÃO DE COMO CONFIGURAR A VARIÁVEL DE SESSÃO =====
@@ -345,4 +458,8 @@ COMMENT ON POLICY clientes_tenant_isolation_policy ON clientes IS 'Isolamento de
 COMMENT ON POLICY produtos_tenant_isolation_policy ON produtos IS 'Isolamento de tenant: apenas acessível pelo tenant atual via app.current_tenant';
 COMMENT ON POLICY vendas_tenant_isolation_policy ON vendas IS 'Isolamento de tenant: apenas acessível pelo tenant atual via app.current_tenant';
 COMMENT ON POLICY lancamentos_tenant_isolation_policy ON lancamentos IS 'Isolamento de tenant: apenas acessível pelo tenant atual via app.current_tenant';
-COMMENT ON POLICY parcelas_tenant_isolation_policy ON parcelas IS 'Isolamento de tenant: apenas acessível pelo tenant atual via app.current_tenant'; 
+COMMENT ON POLICY parcelas_tenant_isolation_policy ON parcelas IS 'Isolamento de tenant: apenas acessível pelo tenant atual via app.current_tenant';
+COMMENT ON POLICY contas_pagar_tenant_isolation_policy ON contas_pagar IS 'Isolamento de tenant: apenas acessível pelo tenant atual via app.current_tenant';
+COMMENT ON POLICY contas_receber_tenant_isolation_policy ON contas_receber IS 'Isolamento de tenant: apenas acessível pelo tenant atual via app.current_tenant';
+COMMENT ON POLICY permissoes_tenant_isolation_policy ON permissoes IS 'Isolamento de tenant: apenas acessível pelo tenant atual via app.current_tenant';
+COMMENT ON POLICY permissoes_usuario_tenant_isolation_policy ON permissoes_usuario IS 'Isolamento de tenant: apenas acessível pelo tenant atual via app.current_tenant'; 

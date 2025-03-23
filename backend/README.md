@@ -277,3 +277,23 @@ TEST_MODE=integration TEST_DB_TYPE=supabase pytest -m integration
    - Execute testes unitários com frequência durante o desenvolvimento
    - Execute testes de integração antes de fazer commit/push
    - Mantenha os testes independentes entre si 
+
+## Documentação
+
+- A documentação da API está disponível em `/docs` quando o servidor está em execução
+- [Guia de Estilo e Nomenclatura](docs/STYLE_GUIDE.md) - Padrões de código e nomenclatura adotados no projeto 
+
+## Segurança e Multi-tenancy
+
+- Todas as tabelas do sistema utilizam Row Level Security (RLS) para isolamento de dados
+- Políticas RLS completamente implementadas e documentadas em [docs/database_policies.md](docs/database_policies.md)
+- Verificação e aplicação de RLS via scripts em `scripts/check_rls.py` e `scripts/apply_unified_rls.py`
+- Backup com suporte a RLS disponível via `scripts/database_backup.py`
+
+## Migrações de Banco de Dados
+
+- Migrações gerenciadas com Alembic através do SQLAlchemy
+- Adicione novas migrações com `alembic revision -m "descrição"`
+- Execute migrações pendentes com `alembic upgrade head`
+- Verifique o estado atual das migrações com `alembic current`
+- Todas as entidades do sistema estão refletidas nas migrações 

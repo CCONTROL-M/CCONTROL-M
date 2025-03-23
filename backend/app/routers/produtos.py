@@ -5,7 +5,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.produto import Produto as ProdutoSchema, ProdutoCreate, ProdutoUpdate, ProdutoList, EstoqueUpdate
-from app.services.produto_service import ProdutoService
+from app.services.produto import ProdutoService
 from app.dependencies import get_current_user
 from app.database import get_async_session
 from app.utils.logging_config import get_logger

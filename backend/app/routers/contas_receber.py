@@ -11,7 +11,7 @@ from app.schemas.conta_receber import (
     ContaReceber, ContaReceberCreate, ContaReceberUpdate, 
     ContaReceberList, StatusContaReceber, ContaReceberRecebimento
 )
-from app.services.conta_receber_service import ContaReceberService
+from app.services.conta_receber import ContaReceberService
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.token import TokenPayload
 from app.dependencies import get_current_user

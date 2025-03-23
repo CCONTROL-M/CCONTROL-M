@@ -324,20 +324,19 @@ def get_logger(name: str) -> logging.Logger:
     
     # Adiciona um filtro de Request-ID ao logger se ainda não tiver
     request_id_filter = next(
-        (f for f in logger.filters if isinstance(f, RequestIdFilter)), 
+        (f for f in logger.filters if isinstance(f, RequestIDFilter)), 
         None
     )
     
     if not request_id_filter:
-        logger.addFilter(RequestIdFilter())
+        logger.addFilter(RequestIDFilter())
     
     return logger
 
 
-class RequestIdFilter(logging.Filter):
-    """
-    Filtro para adicionar o request_id ao contexto de log.
-    """
+class RequestIDFilter(logging.Filter):
+    """Filtro para garantir que request_id esteja sempre presente."""
+    
     def filter(self, record):
         if not hasattr(record, 'request_id'):
             record.request_id = 'no-request-id'

@@ -6,5 +6,11 @@ no sistema CCONTROL-M, seguindo o padrão de modularização.
 """
 
 from app.services.conta_pagar.conta_pagar_service import ContaPagarService
+from app.services.conta_pagar.conta_pagar_query_service import ContaPagarQueryService
+from app.services.conta_pagar.conta_pagar_operations_service import ContaPagarOperationsService
 
-__all__ = ["ContaPagarService"] 
+__all__ = [
+    "ContaPagarService",
+    "ContaPagarQueryService",
+    "ContaPagarOperationsService"
+] 

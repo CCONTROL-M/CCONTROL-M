@@ -45,6 +45,51 @@ USING (id_empresa IN (
 
 Isso permite que um usuário acesse apenas dados das empresas às quais está vinculado.
 
+## Tabelas com Políticas RLS Implementadas
+
+Todas as seguintes tabelas possuem políticas RLS para garantir o isolamento adequado de dados entre empresas:
+
+1. **Usuários** (`usuarios`/`usuario`)
+2. **Clientes** (`clientes`/`cliente`)
+3. **Produtos** (`produtos`/`produto`)
+4. **Vendas** (`vendas`/`venda`)
+5. **Categorias** (`categorias`/`categoria`)
+6. **Lançamentos** (`lancamentos`/`lancamento`)
+7. **Parcelas** (`parcelas`/`parcela`)
+8. **Formas de Pagamento** (`formas_pagamento`/`forma_pagamento`)
+9. **Contas Bancárias** (`contas_bancarias`/`conta_bancaria`)
+10. **Fornecedores** (`fornecedores`/`fornecedor`)
+11. **Centro de Custos** (`centro_custos`/`centro_custo`)
+12. **Logs do Sistema** (`logs_sistema`/`log_sistema`)
+13. **Empresas** (`empresas`/`empresa`)
+14. **Relações Usuário-Empresa** (`usuario_empresa`)
+15. **Contas a Pagar** (`contas_pagar`/`conta_pagar`) ✓
+16. **Contas a Receber** (`contas_receber`/`conta_receber`) ✓
+17. **Permissões** (`permissoes`/`permissao`) ✓
+18. **Permissões de Usuário** (`permissoes_usuario`/`permissao_usuario`) ✓
+
+> ✓ = Políticas adicionadas recentemente
+
+## Verificação e Aplicação
+
+Para verificar a configuração de RLS no banco de dados:
+
+```bash
+python scripts/check_rls.py
+```
+
+Para aplicar as políticas RLS:
+
+```bash
+python scripts/apply_unified_rls.py
+```
+
+Para realizar backup das tabelas, incluindo as políticas RLS:
+
+```bash
+python scripts/database_backup.py --include-rls
+```
+
 ## Como Aplicar as Políticas RLS
 
 ### Método 1: Usando o script Python

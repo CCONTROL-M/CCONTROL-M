@@ -11,7 +11,7 @@ from app.schemas.conta_pagar import (
     ContaPagar, ContaPagarCreate, ContaPagarUpdate, 
     ContaPagarList, StatusContaPagar, ContaPagarPagamento
 )
-from app.services.conta_pagar_service import ContaPagarService
+from app.services.conta_pagar import ContaPagarService
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.token import TokenPayload
 from app.dependencies import get_current_user
