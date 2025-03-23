@@ -1,5 +1,8 @@
 """Schemas Pydantic para validação de dados e serialização no sistema CCONTROL-M."""
 
+from datetime import datetime, date
+from typing import Optional, List, Dict, Any, Union, TypeVar, Generic, Annotated
+
 # flake8: noqa
 from .usuario import (
     UsuarioBase,
@@ -122,6 +125,12 @@ from .permissao_usuario import (
     PermissaoUsuario,
     PermissaoUsuarioList
 )
+from .auditoria import (
+    AuditoriaBase,
+    AuditoriaCreate,
+    AuditoriaResponse,
+    AuditoriaList
+)
 
 # Lista completa de modelos que devem ser exportados
 __all__ = [
@@ -150,7 +159,16 @@ __all__ = [
     
     # Sistema
     'LogSistema', 'LogSistemaCreate', 'LogSistemaList',
-    'PaginatedResponse'
+    'PaginatedResponse',
+    
+    # Auditoria
+    'AuditoriaBase', 'AuditoriaCreate', 'AuditoriaResponse', 'AuditoriaList'
 ]
 
 # Adicionar novos schemas aqui conforme necessário 
+
+class Config:
+    from_attributes = True  # Versão correta para Pydantic V2 (anteriormente orm_mode)
+    json_encoders = {
+        datetime: lambda v: v.isoformat() if v else None,
+    } 

@@ -164,4 +164,46 @@ async def get_user_from_request(request: Request) -> Optional[Dict[str, Any]]:
         return None
     except Exception:
         # Capturar outras exceções e retornar None
-        return None 
+        return None
+
+
+async def get_current_active_user(token: str = Depends(oauth2_scheme)) -> Dict[str, Any]:
+    """
+    Middleware para obter o usuário atual a partir do token JWT.
+    
+    Args:
+        token: Token JWT obtido da requisição
+    
+    Returns:
+        Dados do usuário autenticado
+    
+    Raises:
+        HTTPException: Se o token for inválido, expirado ou o usuário estiver desativado
+    """
+    try:
+        payload = get_token_data(token)
+        
+        # Verificar se o usuário está presente no token
+        if not payload.get("id"):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido: ID de usuário ausente",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            
+        # Verificar se o usuário está ativo (pode ser expandido)
+        if payload.get("disabled", False):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Usuário desativado",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+            
+        return payload
+        
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Não foi possível validar credenciais",
+            headers={"WWW-Authenticate": "Bearer"},
+        ) 

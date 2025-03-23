@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ccontrol"
+version = "0.1.0"
+authors = [
+  { name="Ricardo", email="ricardo@example.com" },
+]
+description = "Sistema de Controle Comercial"
+readme = "README.md"
+requires-python = ">=3.8"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+
+dependencies = [
+    "fastapi>=0.68.0",
+    "uvicorn>=0.15.0",
+    "sqlalchemy>=1.4.0",
+    "pydantic>=1.8.0",
+    "python-jose[cryptography]>=3.3.0",
+    "passlib[bcrypt]>=1.7.4",
+    "python-multipart>=0.0.5",
+    "aiofiles>=0.7.0",
+    "python-dotenv>=0.19.0",
+    "pytest>=6.2.5",
+    "pytest-asyncio>=0.15.1",
+    "httpx>=0.18.2",
+    "asyncpg>=0.24.0",
+    "alembic>=1.7.4"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/yourusername/ccontrol"
+"Bug Tracker" = "https://github.com/yourusername/ccontrol/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"] 

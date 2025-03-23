@@ -1,0 +1,168 @@
+/* Estilos customizados para a documentação Swagger */
+
+/* Cores do tema CCONTROL-M */
+:root {
+    --primary-color: #1976d2;
+    --primary-dark: #0d47a1;
+    --primary-light: #63a4ff;
+    --secondary-color: #388e3c;
+    --accent-color: #f57c00;
+    --bg-light: #f8f9fa;
+    --text-dark: #333;
+    --text-light: #fff;
+    --border-color: #e0e0e0;
+}
+
+/* Estilizar cabeçalho */
+.swagger-ui .topbar {
+    background-color: var(--primary-color);
+    padding: 10px 0;
+}
+
+.swagger-ui .topbar .download-url-wrapper .select-label {
+    color: var(--text-light);
+}
+
+/* Ajustar cabeçalhos de seção */
+.swagger-ui .opblock-tag {
+    font-size: 20px;
+    margin: 20px 0 10px 0;
+    border-bottom: 1px solid var(--border-color);
+    padding-bottom: 10px;
+}
+
+.swagger-ui .opblock-tag:hover {
+    background-color: var(--bg-light);
+    border-radius: 4px;
+}
+
+/* Estilizar blocos de operação */
+.swagger-ui .opblock {
+    border-radius: 6px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 12px;
+}
+
+.swagger-ui .opblock .opblock-summary {
+    padding: 8px 16px;
+}
+
+/* Cores dos métodos */
+.swagger-ui .opblock-get {
+    border-color: var(--primary-color);
+    background: rgba(25, 118, 210, 0.05);
+}
+
+.swagger-ui .opblock-post {
+    border-color: var(--secondary-color);
+    background: rgba(56, 142, 60, 0.05);
+}
+
+.swagger-ui .opblock-put {
+    border-color: var(--accent-color);
+    background: rgba(245, 124, 0, 0.05);
+}
+
+.swagger-ui .opblock-delete {
+    border-color: #d32f2f;
+    background: rgba(211, 47, 47, 0.05);
+}
+
+/* Botões */
+.swagger-ui .btn {
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+.swagger-ui .btn.execute {
+    background-color: var(--primary-color);
+    color: var(--text-light);
+}
+
+.swagger-ui .btn.execute:hover {
+    background-color: var(--primary-dark);
+}
+
+/* Tags e badges */
+.swagger-ui .opblock-tag-section h4 span {
+    padding: 4px 8px;
+    background-color: var(--primary-light);
+    color: var(--text-light);
+    border-radius: 12px;
+    font-size: 12px;
+    margin-left: 10px;
+}
+
+/* Melhorias no modo escuro */
+@media (prefers-color-scheme: dark) {
+    body {
+        /* Estes estilos serão aplicados automaticamente em navegadores com modo escuro habilitado */
+        background-color: #222;
+    }
+    
+    .swagger-ui, .swagger-ui .info .title, .swagger-ui .opblock-tag, .swagger-ui table {
+        color: #e0e0e0;
+    }
+    
+    .swagger-ui .opblock {
+        background-color: #333;
+        border-color: #444;
+    }
+    
+    .swagger-ui textarea, .swagger-ui input[type=text] {
+        background-color: #444;
+        color: #e0e0e0;
+    }
+    
+    .swagger-ui .markdown p, .swagger-ui .markdown li {
+        color: #ccc;
+    }
+    
+    .swagger-ui select {
+        background-color: #444;
+        color: #e0e0e0;
+    }
+}
+
+/* Barra de informações customizada */
+.swagger-ui .info {
+    margin: 20px 0;
+    padding: 15px 20px;
+    background-color: var(--bg-light);
+    border-radius: 8px;
+    border-left: 4px solid var(--primary-color);
+}
+
+.swagger-ui .info .title {
+    color: var(--primary-color);
+    font-weight: 700;
+}
+
+/* Mensagem de nova versão */
+.version-banner {
+    background-color: #e8f5e9;
+    border-left: 4px solid var(--secondary-color);
+    padding: 12px 16px;
+    margin: 16px 0;
+    border-radius: 4px;
+    font-size: 14px;
+}
+
+.version-banner strong {
+    color: var(--secondary-color);
+}
+
+/* Responsividade em telas menores */
+@media (max-width: 768px) {
+    .swagger-ui .wrapper {
+        padding: 0 10px;
+    }
+    
+    .swagger-ui .opblock-summary-path {
+        max-width: 170px;
+    }
+    
+    .swagger-ui .opblock-summary-description {
+        font-size: 12px;
+    }
+} 

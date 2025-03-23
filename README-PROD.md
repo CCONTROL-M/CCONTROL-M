@@ -107,24 +107,83 @@ https://ccontrol-m.seudominio.com.br/api/v1/docs
 
 ## Manutenção
 
-### Backups
+### Backups e Restauração do Banco de Dados
 
-Os backups são configurados para execução automática diária às 02:00. Você pode verificar os backups disponíveis em:
-```
-/opt/ccontrol-m/backups/
-```
+#### Pré-requisitos
 
-Para realizar um backup manual:
+Para utilizar os scripts de backup e restauração, é necessário ter instalado:
+
+- PostgreSQL Client (pg_dump e pg_restore)
+- Bash shell
+
+No Ubuntu/Debian, você pode instalar com:
 ```bash
-sudo /opt/ccontrol-m/scripts/backup.sh
+sudo apt-get update
+sudo apt-get install -y postgresql-client
 ```
 
-### Restauração a partir de um Backup
-
-Para restaurar o sistema a partir de um backup:
+No CentOS/RHEL/Fedora:
 ```bash
-sudo /opt/ccontrol-m/scripts/restore.sh nome_do_arquivo_de_backup.tar.gz
+sudo yum install -y postgresql
 ```
+
+No Windows, instale o PostgreSQL e adicione o diretório `bin` ao PATH do sistema.
+
+#### Configuração
+
+Os scripts de backup e restauração utilizam as configurações do banco de dados definidas no arquivo `.env.prod`. Certifique-se de que a variável `DATABASE_URL` está configurada corretamente.
+
+Exemplo de `DATABASE_URL`:
+```
+DATABASE_URL=postgresql://usuario:senha@host:5432/nome_do_banco
+```
+
+#### Backup do Banco de Dados
+
+Os backups são configurados para manter os últimos 7 arquivos, removendo automaticamente os mais antigos.
+
+**Execução manual do backup:**
+```bash
+cd /opt/ccontrol-m
+./scripts/backup.sh
+```
+
+O script irá:
+1. Ler as configurações do banco de dados do arquivo `.env.prod`
+2. Realizar o backup com pg_dump 
+3. Armazenar o arquivo com timestamp no nome no diretório `/opt/ccontrol-m/backups/`
+4. Manter apenas os 7 backups mais recentes
+
+**Configuração de backup automático (cron):**
+
+Para configurar um backup diário automático às 2h da manhã, execute:
+```bash
+(crontab -l ; echo "0 2 * * * cd /opt/ccontrol-m && ./scripts/backup.sh") | crontab -
+```
+
+#### Restauração do Banco de Dados
+
+Para restaurar o banco de dados a partir de um backup:
+
+```bash
+cd /opt/ccontrol-m
+./scripts/restore.sh <nome_do_arquivo_de_backup>
+```
+
+Por exemplo:
+```bash
+./scripts/restore.sh ccontrol-m_backup_20240322_123045.sql
+```
+
+**Importante:** Se nenhum arquivo for especificado, o script listará todos os backups disponíveis.
+
+O processo de restauração:
+1. Solicita confirmação antes de prosseguir (para evitar restaurações acidentais)
+2. Conecta-se ao PostgreSQL usando as credenciais do `.env.prod`
+3. Executa o pg_restore com a opção -c (clean) para limpar o banco de dados antes da restauração
+4. Apresenta um relatório ao final do processo
+
+**Atenção:** A restauração sobrescreverá completamente o banco de dados atual. Todas as alterações feitas após o backup selecionado serão perdidas.
 
 ### Atualização do Sistema
 

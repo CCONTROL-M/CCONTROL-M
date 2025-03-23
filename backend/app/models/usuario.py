@@ -32,9 +32,10 @@ class Usuario(Base, TimestampedModel):
     telas_permitidas: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     
     # Relacionamentos
-    empresa = relationship("Empresa", back_populates="usuarios")
+    empresa = relationship("Empresa", secondary="usuario_empresa", back_populates="usuarios")
     logs = relationship("LogSistema", back_populates="usuario")
     permissoes = relationship("PermissaoUsuario", back_populates="usuario", cascade="all, delete-orphan")
+    auditoria_logs = relationship("Auditoria", back_populates="usuario", cascade="all, delete-orphan")
     
     def __repr__(self) -> str:
         """Representação em string do usuário."""

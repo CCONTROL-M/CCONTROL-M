@@ -244,7 +244,7 @@ class FornecedorRepository(BaseRepository[Fornecedor, Dict[str, Any], Dict[str, 
         
     async def create(self, data: Dict[str, Any]) -> Fornecedor:
         """
-        Criar novo fornecedor.
+        Criar um novo fornecedor.
         
         Args:
             data: Dados do fornecedor
@@ -252,11 +252,18 @@ class FornecedorRepository(BaseRepository[Fornecedor, Dict[str, Any], Dict[str, 
         Returns:
             Fornecedor criado
         """
+        # Criar instância do modelo
         fornecedor = Fornecedor(**data)
-        self.session.add(fornecedor)
-        await self.session.flush()
-        return fornecedor
         
+        # Adicionar à sessão
+        self.session.add(fornecedor)
+        
+        # Commit
+        await self.session.commit()
+        await self.session.refresh(fornecedor)
+        
+        return fornecedor
+    
     async def update(self, id_fornecedor: UUID, data: Dict[str, Any], id_empresa: UUID) -> Optional[Fornecedor]:
         """
         Atualizar fornecedor existente.
@@ -267,51 +274,54 @@ class FornecedorRepository(BaseRepository[Fornecedor, Dict[str, Any], Dict[str, 
             id_empresa: ID da empresa para validação
             
         Returns:
-            Fornecedor atualizado ou None se não encontrado
+            Fornecedor: Fornecedor atualizado ou None se não encontrado
         """
-        # Primeiro verificar se o fornecedor existe
+        # Verificar se o fornecedor existe
         fornecedor = await self.get_by_id(id_fornecedor, id_empresa)
         if not fornecedor:
             return None
-                
-        # Atualizar campos
-        for key, value in data.items():
+            
+        # Preparar os dados para atualização
+        data_copy = data.copy()
+        data_copy.pop("id_empresa", None)  # Remover id_empresa se existir
+        
+        # Atualizar os campos
+        for key, value in data_copy.items():
             if hasattr(fornecedor, key):
                 setattr(fornecedor, key, value)
-        
-        # Salvar alterações
-        self.session.add(fornecedor)
-        await self.session.flush()
+                
+        # Salvar as alterações
+        await self.session.commit()
+        await self.session.refresh(fornecedor)
         
         return fornecedor
     
     async def delete(self, id_fornecedor: UUID, id_empresa: UUID) -> bool:
         """
-        Excluir fornecedor pelo ID.
+        Excluir fornecedor.
         
         Args:
             id_fornecedor: ID do fornecedor
             id_empresa: ID da empresa para validação
             
         Returns:
-            bool: True se removido com sucesso
+            bool: True se excluído com sucesso, False caso contrário
         """
         # Verificar se o fornecedor existe
         fornecedor = await self.get_by_id(id_fornecedor, id_empresa)
-        
         if not fornecedor:
             return False
-        
-        # Excluir fornecedor
+            
+        # Excluir o fornecedor (ou desativar)
         await self.session.delete(fornecedor)
-        await self.session.flush()
+        await self.session.commit()
         
         return True
     
     async def commit(self):
-        """Persistir alterações no banco de dados."""
+        """Commit das alterações."""
         await self.session.commit()
-    
+        
     async def rollback(self):
-        """Reverter alterações pendentes."""
+        """Rollback das alterações."""
         await self.session.rollback() 

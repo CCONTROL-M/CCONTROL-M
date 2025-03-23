@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status
 import logging
+from datetime import datetime
 
 from app.schemas.forma_pagamento import FormaPagamentoCreate, FormaPagamentoUpdate, FormaPagamento
 from app.repositories.forma_pagamento_repository import FormaPagamentoRepository
@@ -12,6 +13,12 @@ from app.repositories.venda_repository import VendaRepository
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
 from app.database import get_async_session
+from app.schemas.pagination import PaginatedResponse
+from app.services.auditoria_service import AuditoriaService
+
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 
 class FormaPagamentoService:
@@ -19,13 +26,15 @@ class FormaPagamentoService:
     
     def __init__(self, 
                  session: AsyncSession = Depends(get_async_session),
-                 log_service: LogSistemaService = Depends()):
+                 log_service: LogSistemaService = Depends(),
+                 auditoria_service: AuditoriaService = Depends()):
         """Inicializar serviço com repositórios."""
         self.repository = FormaPagamentoRepository(session)
         self.lancamento_repository = LancamentoRepository(session)
         self.venda_repository = VendaRepository(session)
         self.log_service = log_service
-        self.logger = logging.getLogger(__name__)
+        self.auditoria_service = auditoria_service
+        self.logger = logger
         
     async def get_forma_pagamento(self, id_forma_pagamento: UUID, id_empresa: UUID) -> FormaPagamento:
         """
@@ -140,6 +149,18 @@ class FormaPagamentoService:
                 )
             )
             
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="CRIAR_FORMA_PAGAMENTO",
+                detalhes={
+                    "id_forma_pagamento": str(nova_forma.id_forma_pagamento),
+                    "nome": nova_forma.nome,
+                    "tipo": nova_forma.tipo
+                },
+                empresa_id=forma_pagamento.id_empresa
+            )
+            
             return nova_forma
         except Exception as e:
             self.logger.error(f"Erro ao criar forma de pagamento: {str(e)}")
@@ -207,6 +228,17 @@ class FormaPagamentoService:
                 )
             )
             
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="ATUALIZAR_FORMA_PAGAMENTO",
+                detalhes={
+                    "id_forma_pagamento": str(id_forma_pagamento),
+                    "alteracoes": update_data
+                },
+                empresa_id=id_empresa
+            )
+            
             return forma_atualizada
         except Exception as e:
             self.logger.error(f"Erro ao atualizar forma de pagamento: {str(e)}")
@@ -256,6 +288,14 @@ class FormaPagamentoService:
             )
         )
         
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="ATIVAR_FORMA_PAGAMENTO",
+            detalhes={"id_forma_pagamento": str(id_forma_pagamento)},
+            empresa_id=id_empresa
+        )
+        
         return forma_atualizada
         
     async def desativar_forma_pagamento(self, id_forma_pagamento: UUID, id_empresa: UUID, id_usuario: UUID) -> FormaPagamento:
@@ -297,6 +337,14 @@ class FormaPagamentoService:
                 descricao=f"Forma de pagamento desativada: {forma_pagamento.nome}",
                 dados={"id_forma_pagamento": str(id_forma_pagamento)}
             )
+        )
+        
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="DESATIVAR_FORMA_PAGAMENTO",
+            detalhes={"id_forma_pagamento": str(id_forma_pagamento)},
+            empresa_id=id_empresa
         )
         
         return forma_atualizada
@@ -351,6 +399,18 @@ class FormaPagamentoService:
                 descricao=f"Forma de pagamento removida: {forma_pagamento.nome}",
                 dados={"id_forma_pagamento": str(id_forma_pagamento), "nome": forma_pagamento.nome}
             )
+        )
+        
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="EXCLUIR_FORMA_PAGAMENTO",
+            detalhes={
+                "id_forma_pagamento": str(id_forma_pagamento),
+                "nome": forma_pagamento.nome,
+                "tipo": forma_pagamento.tipo
+            },
+            empresa_id=id_empresa
         )
         
         return {"detail": f"Forma de pagamento '{forma_pagamento.nome}' removida com sucesso"} 

@@ -20,4 +20,8 @@ class TimestampedModel:
     updated_at: Mapped[Optional[datetime]] = mapped_column(
         onupdate=func.now(),
         nullable=True
-    ) 
+    )
+
+class Config:
+    arbitrary_types_allowed = True
+    from_attributes = True  # Versão correta para Pydantic V2 (anteriormente orm_mode) 

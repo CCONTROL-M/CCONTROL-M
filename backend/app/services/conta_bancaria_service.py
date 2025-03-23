@@ -5,6 +5,7 @@ from decimal import Decimal
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status
 import logging
+from datetime import datetime
 
 from app.schemas.conta_bancaria import ContaBancariaCreate, ContaBancariaUpdate, ContaBancaria
 from app.repositories.conta_bancaria_repository import ContaBancariaRepository
@@ -12,6 +13,12 @@ from app.repositories.lancamento_repository import LancamentoRepository
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
 from app.database import get_async_session
+from app.schemas.pagination import PaginatedResponse
+from app.services.auditoria_service import AuditoriaService
+
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 
 class ContaBancariaService:
@@ -19,12 +26,14 @@ class ContaBancariaService:
     
     def __init__(self, 
                  session: AsyncSession = Depends(get_async_session),
-                 log_service: LogSistemaService = Depends()):
+                 log_service: LogSistemaService = Depends(),
+                 auditoria_service: AuditoriaService = Depends()):
         """Inicializar serviço com repositórios."""
         self.repository = ContaBancariaRepository(session)
         self.lancamento_repository = LancamentoRepository(session)
         self.log_service = log_service
-        self.logger = logging.getLogger(__name__)
+        self.auditoria_service = auditoria_service
+        self.logger = logger
         
     async def get_conta_bancaria(self, id_conta_bancaria: UUID, id_empresa: UUID) -> ContaBancaria:
         """
@@ -155,6 +164,19 @@ class ContaBancariaService:
                 )
             )
             
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="CRIAR_CONTA_BANCARIA",
+                detalhes={
+                    "id_conta": str(nova_conta.id_conta_bancaria),
+                    "banco": nova_conta.banco,
+                    "agencia": nova_conta.agencia,
+                    "numero": nova_conta.numero
+                },
+                empresa_id=conta_bancaria.id_empresa
+            )
+            
             return nova_conta
         except Exception as e:
             self.logger.error(f"Erro ao criar conta bancária: {str(e)}")
@@ -238,6 +260,17 @@ class ContaBancariaService:
                 )
             )
             
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="ATUALIZAR_CONTA_BANCARIA",
+                detalhes={
+                    "id_conta": str(id_conta_bancaria),
+                    "alteracoes": {k: str(v) if isinstance(v, Decimal) else v for k, v in update_data.items()}
+                },
+                empresa_id=id_empresa
+            )
+            
             return conta_atualizada
         except Exception as e:
             self.logger.error(f"Erro ao atualizar conta bancária: {str(e)}")
@@ -287,6 +320,14 @@ class ContaBancariaService:
             )
         )
         
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="ATIVAR_CONTA_BANCARIA",
+            detalhes={"id_conta": str(id_conta_bancaria)},
+            empresa_id=id_empresa
+        )
+        
         return conta_atualizada
         
     async def desativar_conta_bancaria(self, id_conta_bancaria: UUID, id_empresa: UUID, id_usuario: UUID) -> ContaBancaria:
@@ -328,6 +369,14 @@ class ContaBancariaService:
                 descricao=f"Conta bancária desativada: {conta_bancaria.nome}",
                 dados={"id_conta_bancaria": str(id_conta_bancaria)}
             )
+        )
+        
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="DESATIVAR_CONTA_BANCARIA",
+            detalhes={"id_conta": str(id_conta_bancaria)},
+            empresa_id=id_empresa
         )
         
         return conta_atualizada
@@ -389,6 +438,20 @@ class ContaBancariaService:
             )
         )
         
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="AJUSTAR_SALDO_CONTA",
+            detalhes={
+                "id_conta": str(id_conta_bancaria),
+                "saldo_anterior": float(conta_bancaria.saldo_atual),
+                "novo_saldo": float(novo_saldo),
+                "diferenca": float(novo_saldo - conta_bancaria.saldo_atual),
+                "motivo": motivo
+            },
+            empresa_id=id_empresa
+        )
+        
         return conta_atualizada
         
     async def remover_conta_bancaria(self, id_conta_bancaria: UUID, id_empresa: UUID, id_usuario: UUID) -> Dict[str, Any]:
@@ -432,6 +495,19 @@ class ContaBancariaService:
                 descricao=f"Conta bancária removida: {conta_bancaria.nome}",
                 dados={"id_conta_bancaria": str(id_conta_bancaria), "nome": conta_bancaria.nome}
             )
+        )
+        
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="EXCLUIR_CONTA_BANCARIA",
+            detalhes={
+                "id_conta": str(id_conta_bancaria),
+                "banco": conta_bancaria.banco,
+                "agencia": conta_bancaria.agencia,
+                "numero": conta_bancaria.numero
+            },
+            empresa_id=id_empresa
         )
         
         return {"detail": f"Conta bancária '{conta_bancaria.nome}' removida com sucesso"} 

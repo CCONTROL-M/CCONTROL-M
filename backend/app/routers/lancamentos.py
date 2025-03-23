@@ -29,19 +29,72 @@ router = APIRouter(
 )
 
 
-@router.get("", response_model=PaginatedResponse[Lancamento])
+@router.get(
+    "",
+    response_model=PaginatedResponse[Lancamento],
+    summary="Listar lançamentos financeiros",
+    description="Retorna uma lista paginada de lançamentos financeiros com filtros diversos",
+    responses={
+        status.HTTP_200_OK: {
+            "description": "Lista de lançamentos obtida com sucesso",
+            "content": {
+                "application/json": {
+                    "example": {
+                        "items": [
+                            {
+                                "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                                "descricao": "Pagamento fornecedor XYZ",
+                                "valor": 1500.00,
+                                "data_lancamento": "2023-05-10",
+                                "data_pagamento": "2023-05-15",
+                                "tipo": "DESPESA",
+                                "status": "PAGO",
+                                "id_categoria": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+                                "id_empresa": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                            },
+                            {
+                                "id": "4fa85f64-5717-4562-b3fc-2c963f66afa7",
+                                "descricao": "Recebimento cliente ABC",
+                                "valor": 2500.00,
+                                "data_lancamento": "2023-05-12",
+                                "data_pagamento": None,
+                                "tipo": "RECEITA",
+                                "status": "PENDENTE",
+                                "id_categoria": "5fa85f64-5717-4562-b3fc-2c963f66afa8",
+                                "id_empresa": "3fa85f64-5717-4562-b3fc-2c963f66afa6"
+                            }
+                        ],
+                        "total": 125,
+                        "page": 1,
+                        "pages": 13,
+                        "page_size": 10
+                    }
+                }
+            }
+        },
+        status.HTTP_401_UNAUTHORIZED: {
+            "description": "Não autenticado"
+        },
+        status.HTTP_403_FORBIDDEN: {
+            "description": "Sem permissão para acessar este recurso"
+        },
+        status.HTTP_422_UNPROCESSABLE_ENTITY: {
+            "description": "Erro de validação nos parâmetros"
+        }
+    }
+)
 @require_permission("lancamentos", "listar")
 async def listar_lancamentos(
-    id_empresa: UUID,
-    tipo: Optional[str] = None,
-    id_categoria: Optional[UUID] = None,
-    id_centro_custo: Optional[UUID] = None,
-    id_conta: Optional[UUID] = None,
-    status: Optional[str] = None,
-    data_inicio: Optional[str] = None,
-    data_fim: Optional[str] = None,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(10, ge=1, le=100),
+    id_empresa: UUID = Query(..., description="ID da empresa", example="3fa85f64-5717-4562-b3fc-2c963f66afa6"),
+    tipo: Optional[str] = Query(None, description="Filtrar por tipo (RECEITA, DESPESA)", example="DESPESA"),
+    id_categoria: Optional[UUID] = Query(None, description="Filtrar por categoria"),
+    id_centro_custo: Optional[UUID] = Query(None, description="Filtrar por centro de custo"),
+    id_conta: Optional[UUID] = Query(None, description="Filtrar por conta bancária"),
+    status: Optional[str] = Query(None, description="Filtrar por status (PENDENTE, PAGO, CANCELADO)", example="PENDENTE"),
+    data_inicio: Optional[str] = Query(None, description="Data inicial (formato YYYY-MM-DD)", example="2023-01-01"),
+    data_fim: Optional[str] = Query(None, description="Data final (formato YYYY-MM-DD)", example="2023-12-31"),
+    page: int = Query(1, ge=1, description="Página atual"),
+    page_size: int = Query(10, ge=1, le=100, description="Itens por página"),
     current_user: Usuario = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session),
 ):

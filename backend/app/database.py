@@ -20,10 +20,6 @@ from app.middlewares.tenant_middleware import get_tenant_id
 # Configurar logger
 logger = logging.getLogger(__name__)
 
-class Base(DeclarativeBase):
-    """Classe base declarativa para todos os modelos do SQLAlchemy."""
-    pass
-
 # Criar classe base para modelos
 Base = declarative_base()
 

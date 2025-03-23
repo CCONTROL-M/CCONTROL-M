@@ -21,11 +21,12 @@ class PaginationParams:
 
 
 class PaginatedResponse(BaseModel, Generic[T]):
-    """Resposta paginada genérica."""
+    """Schema para resposta paginada."""
     items: List[T]
     total: int
     page: int
     size: int
+    pages: int
 
     @classmethod
     def create(cls, items: List[T], total: int, page: int, page_size: int) -> "PaginatedResponse[T]":
@@ -48,4 +49,5 @@ class PaginatedResponse(BaseModel, Generic[T]):
             total=total,
             page=page,
             size=page_size,
+            pages=pages,
         ) 

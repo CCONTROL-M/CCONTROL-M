@@ -56,4 +56,10 @@ class PaginatedResponseSchema(ResponseBase[List[T]], Generic[T]):
 class ListResponseSchema(ResponseBase[List[T]], Generic[T]):
     """Schema para resposta de listagem simples (sem paginação)."""
     
-    count: int = 0 
+    count: int = 0
+
+
+class BaseConfig:
+    """Configuração base para todos os esquemas."""
+    from_attributes = True  # Versão correta para Pydantic V2 (anteriormente orm_mode)
+    extra = 'forbid'  # Impede a passagem de campos não declarados 

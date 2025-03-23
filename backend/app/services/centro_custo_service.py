@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status
 import logging
+from datetime import datetime
 
 from app.schemas.centro_custo import CentroCustoCreate, CentroCustoUpdate, CentroCusto
 from app.repositories.centro_custo_repository import CentroCustoRepository
@@ -11,6 +12,12 @@ from app.repositories.lancamento_repository import LancamentoRepository
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
 from app.database import get_async_session
+from app.schemas.pagination import PaginatedResponse
+from app.services.auditoria_service import AuditoriaService
+
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 
 class CentroCustoService:
@@ -18,12 +25,14 @@ class CentroCustoService:
     
     def __init__(self, 
                  session: AsyncSession = Depends(get_async_session),
-                 log_service: LogSistemaService = Depends()):
+                 log_service: LogSistemaService = Depends(),
+                 auditoria_service: AuditoriaService = Depends()):
         """Inicializar serviço com repositórios."""
         self.repository = CentroCustoRepository(session)
         self.lancamento_repository = LancamentoRepository(session)
         self.log_service = log_service
-        self.logger = logging.getLogger(__name__)
+        self.auditoria_service = auditoria_service
+        self.logger = logger
         
     async def get_centro_custo(self, id_centro_custo: UUID, id_empresa: UUID) -> CentroCusto:
         """
@@ -136,6 +145,18 @@ class CentroCustoService:
                 )
             )
             
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="CRIAR_CENTRO_CUSTO",
+                detalhes={
+                    "id_centro_custo": str(novo_centro.id_centro_custo),
+                    "nome": novo_centro.nome,
+                    "tipo": novo_centro.tipo
+                },
+                empresa_id=centro_custo.id_empresa
+            )
+            
             return novo_centro
         except Exception as e:
             self.logger.error(f"Erro ao criar centro de custo: {str(e)}")
@@ -203,6 +224,17 @@ class CentroCustoService:
                 )
             )
             
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="ATUALIZAR_CENTRO_CUSTO",
+                detalhes={
+                    "id_centro_custo": str(id_centro_custo),
+                    "alteracoes": update_data
+                },
+                empresa_id=id_empresa
+            )
+            
             return centro_atualizado
         except Exception as e:
             self.logger.error(f"Erro ao atualizar centro de custo: {str(e)}")
@@ -252,6 +284,14 @@ class CentroCustoService:
             )
         )
         
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="ATIVAR_CENTRO_CUSTO",
+            detalhes={"id_centro_custo": str(id_centro_custo)},
+            empresa_id=id_empresa
+        )
+        
         return centro_atualizado
         
     async def desativar_centro_custo(self, id_centro_custo: UUID, id_empresa: UUID, id_usuario: UUID) -> CentroCusto:
@@ -293,6 +333,14 @@ class CentroCustoService:
                 descricao=f"Centro de custo desativado: {centro_custo.nome}",
                 dados={"id_centro_custo": str(id_centro_custo)}
             )
+        )
+        
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="DESATIVAR_CENTRO_CUSTO",
+            detalhes={"id_centro_custo": str(id_centro_custo)},
+            empresa_id=id_empresa
         )
         
         return centro_atualizado
@@ -338,6 +386,18 @@ class CentroCustoService:
                 descricao=f"Centro de custo removido: {centro_custo.nome}",
                 dados={"id_centro_custo": str(id_centro_custo), "nome": centro_custo.nome}
             )
+        )
+        
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="EXCLUIR_CENTRO_CUSTO",
+            detalhes={
+                "id_centro_custo": str(id_centro_custo),
+                "nome": centro_custo.nome,
+                "tipo": centro_custo.tipo
+            },
+            empresa_id=id_empresa
         )
         
         return {"detail": f"Centro de custo '{centro_custo.nome}' removido com sucesso"} 

@@ -4,20 +4,30 @@ from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status
 import logging
+from datetime import datetime
 
 from app.schemas.empresa import EmpresaCreate, EmpresaUpdate, Empresa
 from app.repositories.empresa_repository import EmpresaRepository
 from app.database import get_async_session
 from app.utils.validators import validar_cnpj
+from app.schemas.pagination import PaginatedResponse
+from app.services.auditoria_service import AuditoriaService
+
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 
 class EmpresaService:
     """Serviço para gerenciamento de empresas."""
     
-    def __init__(self, session: AsyncSession = Depends(get_async_session)):
-        """Inicializar serviço com repositório."""
+    def __init__(self, 
+                 session: AsyncSession = Depends(get_async_session),
+                 auditoria_service: AuditoriaService = Depends()):
+        """Inicializar serviço com repositórios."""
         self.repository = EmpresaRepository(session)
-        self.logger = logging.getLogger(__name__)
+        self.auditoria_service = auditoria_service
+        self.logger = logger
         
     async def get_empresa(self, id_empresa: UUID) -> Empresa:
         """
@@ -83,12 +93,13 @@ class EmpresaService:
             filters=filters
         )
         
-    async def criar_empresa(self, empresa: EmpresaCreate) -> Empresa:
+    async def criar_empresa(self, empresa: EmpresaCreate, usuario_id: UUID) -> Empresa:
         """
         Criar nova empresa.
         
         Args:
             empresa: Dados da empresa a ser criada
+            usuario_id: ID do usuário que está criando
             
         Returns:
             Empresa criada
@@ -120,7 +131,23 @@ class EmpresaService:
         
         # Criar empresa no repositório
         try:
-            return await self.repository.create(empresa_data)
+            # Criar empresa
+            nova_empresa = await self.repository.create(empresa_data)
+            
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="CRIAR_EMPRESA",
+                detalhes={
+                    "id_empresa": str(nova_empresa.id_empresa),
+                    "razao_social": nova_empresa.razao_social,
+                    "nome_fantasia": nova_empresa.nome_fantasia,
+                    "cnpj": nova_empresa.cnpj
+                },
+                empresa_id=nova_empresa.id_empresa
+            )
+            
+            return nova_empresa
         except HTTPException as e:
             self.logger.warning(f"Erro ao criar empresa: {e.detail}")
             raise
@@ -131,13 +158,14 @@ class EmpresaService:
                 detail="Erro interno ao criar empresa"
             )
         
-    async def atualizar_empresa(self, id_empresa: UUID, empresa: EmpresaUpdate) -> Empresa:
+    async def atualizar_empresa(self, id_empresa: UUID, empresa: EmpresaUpdate, usuario_id: UUID) -> Empresa:
         """
         Atualizar empresa existente.
         
         Args:
             id_empresa: ID da empresa a ser atualizada
             empresa: Dados para atualização
+            usuario_id: ID do usuário que está atualizando
             
         Returns:
             Empresa atualizada
@@ -182,6 +210,17 @@ class EmpresaService:
                     detail="Empresa não encontrada"
                 )
             
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="ATUALIZAR_EMPRESA",
+                detalhes={
+                    "id_empresa": str(id_empresa),
+                    "alteracoes": update_data
+                },
+                empresa_id=id_empresa
+            )
+            
             return empresa_atualizada
         except HTTPException as e:
             self.logger.warning(f"Erro ao atualizar empresa: {e.detail}")
@@ -193,12 +232,13 @@ class EmpresaService:
                 detail="Erro interno ao atualizar empresa"
             )
         
-    async def desativar_empresa(self, id_empresa: UUID) -> Dict[str, Any]:
+    async def desativar_empresa(self, id_empresa: UUID, usuario_id: UUID) -> Dict[str, Any]:
         """
         Desativar empresa pelo ID.
         
         Args:
             id_empresa: ID da empresa a ser desativada
+            usuario_id: ID do usuário que está desativando
             
         Returns:
             Mensagem de confirmação
@@ -220,15 +260,29 @@ class EmpresaService:
         update_data = {"ativo": False}
         await self.repository.update(id_empresa, update_data)
         
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=usuario_id,
+            acao="DESATIVAR_EMPRESA",
+            detalhes={
+                "id_empresa": str(id_empresa),
+                "razao_social": empresa.razao_social,
+                "nome_fantasia": empresa.nome_fantasia,
+                "cnpj": empresa.cnpj
+            },
+            empresa_id=id_empresa
+        )
+        
         self.logger.info(f"Empresa desativada com sucesso: {id_empresa}")
         return {"detail": "Empresa desativada com sucesso"}
         
-    async def ativar_empresa(self, id_empresa: UUID) -> Dict[str, Any]:
+    async def ativar_empresa(self, id_empresa: UUID, usuario_id: UUID) -> Dict[str, Any]:
         """
         Ativar empresa pelo ID.
         
         Args:
             id_empresa: ID da empresa a ser ativada
+            usuario_id: ID do usuário que está ativando
             
         Returns:
             Mensagem de confirmação
@@ -250,5 +304,60 @@ class EmpresaService:
         update_data = {"ativo": True}
         await self.repository.update(id_empresa, update_data)
         
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=usuario_id,
+            acao="ATIVAR_EMPRESA",
+            detalhes={
+                "id_empresa": str(id_empresa),
+                "razao_social": empresa.razao_social,
+                "nome_fantasia": empresa.nome_fantasia,
+                "cnpj": empresa.cnpj
+            },
+            empresa_id=id_empresa
+        )
+        
         self.logger.info(f"Empresa ativada com sucesso: {id_empresa}")
-        return {"detail": "Empresa ativada com sucesso"} 
+        return {"detail": "Empresa ativada com sucesso"}
+
+    async def get_multi(
+        self,
+        skip: int = 0,
+        limit: int = 100,
+        status: Optional[str] = None,
+        busca: Optional[str] = None
+    ) -> PaginatedResponse[Empresa]:
+        """
+        Buscar múltiplas empresas com filtros.
+        
+        Args:
+            skip: Número de registros para pular
+            limit: Número máximo de registros
+            status: Filtrar por status
+            busca: Termo para busca
+            
+        Returns:
+            Lista paginada de empresas
+        """
+        try:
+            empresas, total = await self.repository.get_multi(
+                skip=skip,
+                limit=limit,
+                status=status,
+                busca=busca
+            )
+            
+            return PaginatedResponse(
+                items=empresas,
+                total=total,
+                page=skip // limit + 1 if limit > 0 else 1,
+                size=limit,
+                pages=(total + limit - 1) // limit if limit > 0 else 1
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao buscar empresas: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao buscar empresas"
+            ) 

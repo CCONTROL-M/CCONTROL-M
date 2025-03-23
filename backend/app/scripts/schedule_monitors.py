@@ -145,6 +145,10 @@ async def clean_temp_files():
         
         # Verificar se o diretório existe
         if not os.path.exists(temp_dir):
+            logger.warning(f"Diretório de arquivos temporários não existe: {temp_dir}")
+            # Criar o diretório se não existir
+            os.makedirs(temp_dir, exist_ok=True)
+            logger.info(f"Diretório de arquivos temporários criado: {temp_dir}")
             return
         
         # Obter data limite (arquivos mais antigos que 1 dia)
@@ -166,9 +170,7 @@ async def clean_temp_files():
                     os.remove(file_path)
                     count += 1
         
-        if count > 0:
-            logger.info(f"Limpeza de arquivos temporários: {count} arquivos removidos")
-            
+        logger.info(f"Limpeza de arquivos temporários concluída: {count} arquivos removidos")
     except Exception as e:
         logger.error(f"Erro ao limpar arquivos temporários: {str(e)}")
 

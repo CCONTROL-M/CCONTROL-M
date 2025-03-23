@@ -3,7 +3,6 @@ from typing import Optional, List, Dict, Any, Tuple
 from uuid import UUID
 from sqlalchemy import or_, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi import HTTPException, status
 
 from app.models.cliente import Cliente
 from app.schemas.cliente import ClienteCreate, ClienteUpdate
@@ -140,73 +139,50 @@ class ClienteRepository(BaseRepository[Cliente, ClienteCreate, ClienteUpdate]):
         Returns:
             Cliente: Cliente atualizado ou None se não encontrado
         """
-        try:
-            # Primeiro verificar se o cliente existe e pertence à empresa
-            cliente = await self.get_by_id(id_cliente, id_empresa)
-            if not cliente:
-                return None
+        # Primeiro verificar se o cliente existe e pertence à empresa
+        cliente = await self.get_by_id(id_cliente, id_empresa)
+        if not cliente:
+            return None
+            
+        # Preparar os dados para atualização
+        data_copy = data.copy()
+        data_copy.pop("id_empresa", None)  # Remover id_empresa se existir
+        
+        # Atualizar os campos do cliente
+        for key, value in data_copy.items():
+            if hasattr(cliente, key):
+                setattr(cliente, key, value)
                 
-            # Preparar os dados para atualização
-            data_copy = data.copy()
-            data_copy.pop("id_empresa", None)  # Remover id_empresa se existir
-            
-            # Construir a consulta de atualização
-            stmt = (
-                select(Cliente)
-                .where(Cliente.id_cliente == id_cliente)
-                .where(Cliente.id_empresa == id_empresa)
-            )
-            
-            result = await self.session.execute(stmt)
-            cliente = result.scalar_one_or_none()
-            
-            if not cliente:
-                return None
-                
-            # Atualizar os atributos do cliente
-            for key, value in data_copy.items():
-                if hasattr(cliente, key):
-                    setattr(cliente, key, value)
-            
-            # Salvar as alterações
-            self.session.add(cliente)
-            await self.session.commit()
-            await self.session.refresh(cliente)
-            
-            return cliente
-        except Exception as e:
-            await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao atualizar cliente: {str(e)}"
-            )
+        # Salvar as alterações
+        await self.session.commit()
+        await self.session.refresh(cliente)
+        
+        return cliente
     
     async def delete(self, id_cliente: UUID, id_empresa: UUID) -> bool:
         """
-        Excluir cliente pelo ID.
+        Excluir cliente.
         
         Args:
             id_cliente: ID do cliente
             id_empresa: ID da empresa para validação
             
         Returns:
-            bool: True se removido com sucesso
+            bool: True se excluído com sucesso, False caso contrário
         """
-        # Construir consulta de exclusão
-        stmt = (
-            select(Cliente)
-            .where(Cliente.id_cliente == id_cliente)
-            .where(Cliente.id_empresa == id_empresa)
-        )
-        
-        result = await self.session.execute(stmt)
-        cliente = result.scalar_one_or_none()
-        
+        # Verificar se o cliente existe e pertence à empresa
+        cliente = await self.get_by_id(id_cliente, id_empresa)
         if not cliente:
             return False
             
-        # Excluir o cliente
+        # Excluir o cliente (ou marcar como inativo)
+        # Opção 1: Exclusão física
         await self.session.delete(cliente)
+        
+        # Opção 2: Exclusão lógica (marcar como inativo)
+        # cliente.ativo = False
+        
+        # Salvar alterações
         await self.session.commit()
         
         return True

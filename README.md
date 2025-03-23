@@ -7,6 +7,7 @@ CCONTROL-M é um sistema de controle empresarial completo desenvolvido em Python
 ## 🚀 Tecnologias
 
 - **Backend**: Python 3.8+, FastAPI, SQLAlchemy, PostgreSQL
+- **Banco de Dados**: PostgreSQL (local) ou Supabase (cloud)
 - **Segurança**: JWT, OAuth2, CORS, Rate Limiting
 - **Documentação**: OpenAPI (Swagger), ReDoc
 - **Monitoramento**: Prometheus, Grafana
@@ -16,7 +17,7 @@ CCONTROL-M é um sistema de controle empresarial completo desenvolvido em Python
 ## 🛠️ Requisitos
 
 - Python 3.8+
-- PostgreSQL 13+
+- PostgreSQL 13+ ou acesso ao Supabase
 - Docker e Docker Compose (opcional)
 - wkhtmltopdf (para geração de PDFs)
 
@@ -49,12 +50,26 @@ cp .env.example .env
 # Edite o arquivo .env com suas configurações
 ```
 
-5. Execute as migrações:
+5. Configure o acesso ao banco de dados:
+
+   **Opção 1: PostgreSQL Local**
+   ```
+   DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost/ccontrolm
+   ```
+
+   **Opção 2: Supabase**
+   ```
+   DATABASE_URL=postgresql+asyncpg://{SUPABASE_DB_USER}:{SUPABASE_DB_PASSWORD}@{SUPABASE_DB_HOST}:5432/{SUPABASE_DB_NAME}
+   SUPABASE_URL=https://seu-projeto.supabase.co
+   SUPABASE_ANON_KEY=sua-chave-anon-aqui
+   ```
+
+6. Execute as migrações:
 ```bash
 alembic upgrade head
 ```
 
-6. Inicie o servidor de desenvolvimento:
+7. Inicie o servidor de desenvolvimento:
 ```bash
 uvicorn app.main:app --reload
 ```
@@ -65,6 +80,35 @@ uvicorn app.main:app --reload
 ```bash
 docker-compose up -d --build
 ```
+
+## 🗄️ Configuração do Banco de Dados
+
+O sistema suporta dois modos de operação para o banco de dados:
+
+### PostgreSQL Local
+
+Para desenvolvimento local ou implantação em servidores próprios, configure o PostgreSQL:
+
+1. Instale o PostgreSQL 13+
+2. Crie um banco de dados para o projeto
+3. Configure a URL de conexão no arquivo `.env`:
+   ```
+   DATABASE_URL=postgresql+asyncpg://usuario:senha@localhost/nome_do_banco
+   ```
+
+### Supabase (PostgreSQL na nuvem)
+
+Para facilitar o desenvolvimento e implantação, o sistema também suporta o Supabase:
+
+1. Crie uma conta no [Supabase](https://supabase.com/)
+2. Crie um novo projeto
+3. Obtenha as credenciais de conexão na seção "Settings > Database"
+4. Configure no arquivo `.env`:
+   ```
+   DATABASE_URL=postgresql+asyncpg://postgres.xxxxxxxxxxxx:senha@db.xxxxxxxxxxxx.supabase.co:5432/postgres
+   SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
+   SUPABASE_ANON_KEY=eyJxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+   ```
 
 ## 📚 Documentação
 

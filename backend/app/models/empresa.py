@@ -76,6 +76,10 @@ class Empresa(Base, TimestampedModel):
         back_populates="empresa", 
         cascade="all, delete-orphan"
     )
+    auditoria_logs: Mapped[List["Auditoria"]] = relationship(
+        back_populates="empresa", 
+        cascade="all, delete-orphan"
+    )
     
     def __repr__(self) -> str:
         """Representação em string da empresa."""

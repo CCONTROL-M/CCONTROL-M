@@ -5,7 +5,7 @@ from app.services.fornecedor_service import FornecedorService
 from app.services.log_sistema_service import LogSistemaService
 from app.services.empresa_service import EmpresaService
 from app.services.usuario_service import UsuarioService
-from app.services.venda_service import VendaService
+from app.services.venda import VendaService
 from app.services.parcela_service import ParcelaService
 from app.services.lancamento_service import LancamentoService
 from app.services.forma_pagamento_service import FormaPagamentoService

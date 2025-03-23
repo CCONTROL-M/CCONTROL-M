@@ -7,7 +7,7 @@ Este middleware implementa várias camadas de proteção:
 3. Implementação de cabeçalhos de segurança
 4. Verificação de integridade de dados
 """
-from fastapi import Request, Response
+from fastapi import Request, Response, HTTPException, status
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from typing import Callable, Dict, Any, List, Set, Optional
@@ -24,6 +24,7 @@ from app.config.settings import settings
 from app.utils.logging_config import get_logger
 from app.utils.validation import detect_attack_patterns, has_attack_input
 from app.utils.validation import sanitize_string, validate_url_params
+from app.core.security import get_current_active_user
 
 
 # Configurar logger
@@ -497,4 +498,44 @@ def create_error_response(status_code: int, error: str, message: str, headers: d
         status_code=status_code,
         content=content,
         headers=headers or {}
-    ) 
+    )
+
+
+def require_permission(permission: str):
+    """
+    Verifica se o usuário atual tem a permissão especificada.
+    
+    Args:
+        permission: Nome da permissão requerida (formato: recurso:ação)
+        
+    Raises:
+        HTTPException: Se o usuário não tiver a permissão necessária
+    """
+    async def _get_user_and_check():
+        # Obtém o usuário atual
+        user = await get_current_active_user()
+        
+        # Verifica se é superusuário (tem todas as permissões)
+        if user.get("superuser", False):
+            return True
+            
+        # Verifica permissões específicas
+        user_permissions = user.get("permissions", [])
+        
+        # Se o usuário tiver a permissão específica ou a permissão wildcard do recurso
+        resource = permission.split(':')[0]
+        if permission in user_permissions or f"{resource}:*" in user_permissions:
+            return True
+            
+        # Verifica se o usuário tem a permissão em alguma de suas funções
+        user_roles = user.get("roles", [])
+        if "admin" in user_roles:
+            return True
+            
+        # Se chegou aqui, não tem permissão
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Acesso negado: permissão '{permission}' requerida"
+        )
+    
+    return _get_user_and_check() 

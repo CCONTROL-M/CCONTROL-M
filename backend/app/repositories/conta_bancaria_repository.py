@@ -11,6 +11,169 @@ from app.models.lancamento import Lancamento
 from app.schemas.conta_bancaria import ContaBancariaCreate, ContaBancariaUpdate, AtualizacaoSaldo
 from app.repositories.base_repository import BaseRepository
 
+# Funções auxiliares de consulta (anteriormente em conta_bancaria_queries.py)
+def build_conta_bancaria_filters(
+    query,
+    id_empresa: Optional[UUID] = None,
+    ativa: Optional[bool] = None,
+    mostrar_dashboard: Optional[bool] = None,
+    tipo: Optional[str] = None,
+    filters: Optional[Dict[str, Any]] = None
+):
+    """
+    Constrói os filtros de consulta para contas bancárias.
+    
+    Args:
+        query: Query SQLAlchemy base
+        id_empresa: Filtrar por empresa específica
+        ativa: Filtrar por status de ativação
+        mostrar_dashboard: Filtrar por exibição no dashboard
+        tipo: Filtrar por tipo de conta
+        filters: Filtros adicionais
+        
+    Returns:
+        Query SQLAlchemy com filtros aplicados
+    """
+    # Aplicar filtros principais
+    if id_empresa:
+        query = query.where(ContaBancaria.empresa_id == id_empresa)
+        
+    if ativa is not None:
+        query = query.where(ContaBancaria.ativa == ativa)
+        
+    if mostrar_dashboard is not None:
+        query = query.where(ContaBancaria.mostrar_dashboard == mostrar_dashboard)
+        
+    if tipo:
+        query = query.where(ContaBancaria.tipo == tipo)
+    
+    # Filtros adicionais
+    if filters:
+        # Tratamento especial para busca por nome
+        if "nome" in filters and filters["nome"]:
+            termo_busca = f"%{filters['nome']}%"
+            query = query.where(ContaBancaria.nome.ilike(termo_busca))
+            
+        # Tratamento para busca por banco
+        if "banco" in filters and filters["banco"]:
+            termo_busca = f"%{filters['banco']}%"
+            query = query.where(ContaBancaria.banco.ilike(termo_busca))
+        
+        # Processamento dos demais filtros
+        for field, value in filters.items():
+            if value is not None and hasattr(ContaBancaria, field) and field not in ["nome", "banco"]:
+                query = query.where(getattr(ContaBancaria, field) == value)
+    
+    return query
+
+
+async def compute_conta_dashboard(session: AsyncSession, id_empresa: UUID) -> Dict[str, Any]:
+    """
+    Calcula dados para o dashboard de contas bancárias.
+    
+    Args:
+        session: Sessão do banco de dados
+        id_empresa: ID da empresa
+        
+    Returns:
+        Dict: Dados do dashboard
+    """
+    # Consultar contas que devem ser exibidas no dashboard
+    query = select(ContaBancaria).where(
+        ContaBancaria.empresa_id == id_empresa,
+        ContaBancaria.ativa == True,
+        ContaBancaria.mostrar_dashboard == True
+    ).order_by(ContaBancaria.nome)
+    
+    result = await session.execute(query)
+    contas = list(result.scalars().all())
+    
+    # Calcular saldo total
+    saldo_total = sum(conta.saldo_atual for conta in contas)
+    
+    # Calcular previsão futura
+    # TODO: Implementar cálculo de previsão futura baseado em lançamentos futuros
+    
+    # Montar objeto de resposta
+    dashboard_data = {
+        "saldo_total": saldo_total,
+        "contas": [{
+            "id": str(conta.id),
+            "nome": conta.nome,
+            "saldo_atual": conta.saldo_atual,
+            "cor": conta.cor,
+            "icone": conta.icone,
+            "banco": conta.banco,
+            "tipo": conta.tipo
+        } for conta in contas],
+        "total_contas": len(contas)
+    }
+    
+    return dashboard_data
+
+
+async def validate_conta_bancaria_exists(
+    session: AsyncSession, 
+    id_conta: UUID, 
+    id_empresa: UUID
+) -> ContaBancaria:
+    """
+    Valida se uma conta bancária existe e pertence à empresa especificada.
+    
+    Args:
+        session: Sessão do banco de dados
+        id_conta: ID da conta bancária
+        id_empresa: ID da empresa
+        
+    Returns:
+        ContaBancaria: Conta bancária validada
+        
+    Raises:
+        HTTPException: Se a conta não for encontrada ou não pertencer à empresa
+    """
+    query = select(ContaBancaria).where(
+        ContaBancaria.id == id_conta,
+        ContaBancaria.empresa_id == id_empresa
+    )
+    
+    result = await session.execute(query)
+    conta = result.scalars().first()
+    
+    if not conta:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Conta bancária não encontrada ou não pertence a esta empresa"
+        )
+    
+    return conta
+
+
+async def validate_conta_bancaria_access(
+    session: AsyncSession, 
+    id_conta: UUID, 
+    id_empresa: UUID
+) -> bool:
+    """
+    Verifica se o usuário tem acesso à conta bancária através da empresa.
+    
+    Args:
+        session: Sessão do banco de dados
+        id_conta: ID da conta bancária
+        id_empresa: ID da empresa do usuário
+        
+    Returns:
+        bool: True se o usuário tem acesso, False caso contrário
+    """
+    query = select(ContaBancaria).where(
+        ContaBancaria.id == id_conta,
+        ContaBancaria.empresa_id == id_empresa
+    )
+    
+    result = await session.execute(query)
+    conta = result.scalars().first()
+    
+    return conta is not None
+
 
 class ContaBancariaRepository(BaseRepository[ContaBancaria, ContaBancariaCreate, ContaBancariaUpdate]):
     """Repositório para operações com contas bancárias."""
@@ -29,15 +192,15 @@ class ContaBancariaRepository(BaseRepository[ContaBancaria, ContaBancariaCreate,
             id_empresa: ID da empresa para validação (opcional)
             
         Returns:
-            ContaBancaria se encontrada, None caso contrário
+            ContaBancaria: Objeto da conta bancária ou None se não encontrada
         """
-        query = select(ContaBancaria).where(ContaBancaria.id_conta == id_conta)
+        query = select(ContaBancaria).where(ContaBancaria.id == id_conta)
         
         if id_empresa:
-            query = query.where(ContaBancaria.id_empresa == id_empresa)
+            query = query.where(ContaBancaria.empresa_id == id_empresa)
             
         result = await self.session.execute(query)
-        return result.scalar_one_or_none()
+        return result.scalars().first()
     
     async def get_by_entity_id(self, id: UUID) -> Optional[ContaBancaria]:
         """
@@ -324,19 +487,8 @@ class ContaBancariaRepository(BaseRepository[ContaBancaria, ContaBancariaCreate,
             
         Returns:
             ContaBancaria: Conta bancária criada
-            
-        Raises:
-            HTTPException: Se já existir uma conta com o mesmo nome
         """
         try:
-            # Verificar se já existe conta com o mesmo nome
-            conta_existente = await self.get_by_nome(data["nome"], data["id_empresa"])
-            if conta_existente:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Já existe uma conta bancária com este nome para esta empresa"
-                )
-            
             # Criar objeto conta bancária
             db_obj = ContaBancaria(**data)
             
@@ -350,53 +502,35 @@ class ContaBancariaRepository(BaseRepository[ContaBancaria, ContaBancariaCreate,
             return db_obj
         except Exception as e:
             await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao criar conta bancária: {str(e)}"
-            )
+            raise e
     
-    async def update(self, id_conta: UUID, data: Dict[str, Any], id_empresa: UUID) -> Optional[ContaBancaria]:
+    async def update(self, id_conta: UUID, data: Dict[str, Any]) -> Optional[ContaBancaria]:
         """
         Atualiza uma conta bancária existente.
         
         Args:
             id_conta: ID da conta bancária
             data: Dados para atualização
-            id_empresa: ID da empresa para validação
             
         Returns:
             ContaBancaria: Conta bancária atualizada ou None se não encontrada
-            
-        Raises:
-            HTTPException: Se o novo nome já estiver em uso
         """
         try:
-            # Primeiro verificar se a conta existe e pertence à empresa
-            conta = await self.get_by_id(id_conta, id_empresa)
+            # Primeiro verificar se a conta existe
+            conta = await self.get_by_id(id_conta)
             if not conta:
                 return None
             
             # Guardar valores antigos para verificar mudanças
             saldo_inicial_antigo = conta.saldo_inicial
             
-            # Verificar se está alterando o nome e se o novo nome já existe
-            data_copy = data.copy()
-            
-            if "nome" in data_copy and data_copy["nome"] != conta.nome:
-                conta_existente = await self.get_by_nome(data_copy["nome"], id_empresa)
-                if conta_existente and conta_existente.id_conta != id_conta:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Já existe uma conta bancária com este nome para esta empresa"
-                    )
-            
             # Se houver mudança no saldo inicial, ajustar o saldo atual
-            if "saldo_inicial" in data_copy and data_copy["saldo_inicial"] != saldo_inicial_antigo:
-                diferenca = data_copy["saldo_inicial"] - saldo_inicial_antigo
+            if "saldo_inicial" in data and data["saldo_inicial"] != saldo_inicial_antigo:
+                diferenca = data["saldo_inicial"] - saldo_inicial_antigo
                 conta.saldo_atual += diferenca
             
             # Atualizar campos
-            for field, value in data_copy.items():
+            for field, value in data.items():
                 if hasattr(conta, field):
                     setattr(conta, field, value)
             
@@ -405,44 +539,29 @@ class ContaBancariaRepository(BaseRepository[ContaBancaria, ContaBancariaCreate,
             await self.session.refresh(conta)
             
             return conta
-        except HTTPException:
-            raise
         except Exception as e:
             await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao atualizar conta bancária: {str(e)}"
-            )
+            raise e
     
-    async def delete(self, id_conta: UUID, id_empresa: UUID) -> bool:
+    async def delete(self, id_conta: UUID) -> bool:
         """
         Remove uma conta bancária.
         
         Args:
             id_conta: ID da conta bancária
-            id_empresa: ID da empresa para validação
             
         Returns:
             bool: True se removida com sucesso
-            
-        Raises:
-            HTTPException: Se a conta não for encontrada ou tiver lançamentos associados
         """
         try:
-            # Verificar se a conta existe e pertence à empresa
-            query = select(ContaBancaria).where(
-                ContaBancaria.id_conta == id_conta,
-                ContaBancaria.id_empresa == id_empresa
-            )
+            # Verificar se a conta existe
+            query = select(ContaBancaria).where(ContaBancaria.id == id_conta)
             
             result = await self.session.execute(query)
             conta = result.scalar_one_or_none()
             
             if not conta:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conta bancária não encontrada"
-                )
+                return False
             
             # Verificar se existem lançamentos utilizando esta conta
             query_lancamentos = select(func.count()).select_from(Lancamento).where(
@@ -453,53 +572,35 @@ class ContaBancariaRepository(BaseRepository[ContaBancaria, ContaBancariaCreate,
             lancamentos = result.scalar_one() or 0
             
             if lancamentos > 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Não é possível excluir esta conta pois ela está sendo utilizada em {lancamentos} lançamento(s)"
-                )
+                return False
             
             await self.session.delete(conta)
             await self.session.commit()
             
             return True
-        except HTTPException:
-            raise
         except Exception as e:
             await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao excluir conta bancária: {str(e)}"
-            )
+            raise e
     
-    async def toggle_ativa(self, id_conta: UUID, id_empresa: UUID) -> ContaBancaria:
+    async def toggle_ativa(self, id_conta: UUID) -> Optional[ContaBancaria]:
         """
         Alterna o status de ativação da conta bancária.
         
         Args:
             id_conta: ID da conta bancária
-            id_empresa: ID da empresa para validação
             
         Returns:
-            ContaBancaria: Conta bancária atualizada
-            
-        Raises:
-            HTTPException: Se a conta bancária não for encontrada
+            ContaBancaria: Conta bancária atualizada ou None se não encontrada
         """
         try:
-            # Verificar se a conta existe e pertence à empresa
-            query = select(ContaBancaria).where(
-                ContaBancaria.id_conta == id_conta,
-                ContaBancaria.id_empresa == id_empresa
-            )
+            # Verificar se a conta existe
+            query = select(ContaBancaria).where(ContaBancaria.id == id_conta)
             
             result = await self.session.execute(query)
             conta = result.scalar_one_or_none()
             
             if not conta:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conta bancária não encontrada"
-                )
+                return None
             
             conta.ativa = not conta.ativa
             
@@ -508,44 +609,29 @@ class ContaBancariaRepository(BaseRepository[ContaBancaria, ContaBancariaCreate,
             await self.session.refresh(conta)
             
             return conta
-        except HTTPException:
-            raise
         except Exception as e:
             await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao alternar status da conta bancária: {str(e)}"
-            )
+            raise e
     
-    async def toggle_dashboard(self, id_conta: UUID, id_empresa: UUID) -> ContaBancaria:
+    async def toggle_dashboard(self, id_conta: UUID) -> Optional[ContaBancaria]:
         """
         Alterna a exibição da conta no dashboard.
         
         Args:
             id_conta: ID da conta bancária
-            id_empresa: ID da empresa para validação
             
         Returns:
-            ContaBancaria: Conta bancária atualizada
-            
-        Raises:
-            HTTPException: Se a conta bancária não for encontrada
+            ContaBancaria: Conta bancária atualizada ou None se não encontrada
         """
         try:
-            # Verificar se a conta existe e pertence à empresa
-            query = select(ContaBancaria).where(
-                ContaBancaria.id_conta == id_conta,
-                ContaBancaria.id_empresa == id_empresa
-            )
+            # Verificar se a conta existe
+            query = select(ContaBancaria).where(ContaBancaria.id == id_conta)
             
             result = await self.session.execute(query)
             conta = result.scalar_one_or_none()
             
             if not conta:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conta bancária não encontrada"
-                )
+                return None
             
             conta.mostrar_dashboard = not conta.mostrar_dashboard
             
@@ -554,68 +640,44 @@ class ContaBancariaRepository(BaseRepository[ContaBancaria, ContaBancariaCreate,
             await self.session.refresh(conta)
             
             return conta
-        except HTTPException:
-            raise
         except Exception as e:
             await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao alternar exibição no dashboard: {str(e)}"
-            )
+            raise e
     
     async def atualizar_saldo(
         self, 
         id_conta: UUID, 
-        operacao: AtualizacaoSaldo,
-        id_empresa: UUID
-    ) -> ContaBancaria:
+        operacao: str,
+        valor: float
+    ) -> Optional[ContaBancaria]:
         """
         Atualiza o saldo de uma conta bancária.
         
         Args:
             id_conta: ID da conta bancária
-            operacao: Operação de atualização do saldo
-            id_empresa: ID da empresa para validação
+            operacao: Tipo de operação (credito, debito, ajuste)
+            valor: Valor da operação
             
         Returns:
-            ContaBancaria: Conta bancária atualizada
-            
-        Raises:
-            HTTPException: Se a conta bancária não for encontrada
+            ContaBancaria: Conta bancária atualizada ou None se não encontrada
         """
         try:
-            # Verificar se a conta existe e pertence à empresa
-            query = select(ContaBancaria).where(
-                ContaBancaria.id_conta == id_conta,
-                ContaBancaria.id_empresa == id_empresa
-            )
+            # Verificar se a conta existe
+            query = select(ContaBancaria).where(ContaBancaria.id == id_conta)
             
             result = await self.session.execute(query)
             conta = result.scalar_one_or_none()
             
             if not conta:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Conta bancária não encontrada"
-                )
+                return None
             
             # Aplicar operação
-            if operacao.tipo_operacao == "credito":
-                conta.saldo_atual += operacao.valor
-            elif operacao.tipo_operacao == "debito":
-                if conta.saldo_atual < operacao.valor:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="Saldo insuficiente para realizar esta operação"
-                    )
-                conta.saldo_atual -= operacao.valor
-            elif operacao.tipo_operacao == "ajuste":
-                conta.saldo_atual = operacao.valor
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Tipo de operação inválido. Use 'credito', 'debito' ou 'ajuste'."
-                )
+            if operacao == "credito":
+                conta.saldo_atual += valor
+            elif operacao == "debito":
+                conta.saldo_atual -= valor
+            elif operacao == "ajuste":
+                conta.saldo_atual = valor
             
             conta.updated_at = datetime.now()
             
@@ -624,11 +686,6 @@ class ContaBancariaRepository(BaseRepository[ContaBancaria, ContaBancariaCreate,
             await self.session.refresh(conta)
             
             return conta
-        except HTTPException:
-            raise
         except Exception as e:
             await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao atualizar saldo: {str(e)}"
-            ) 
+            raise e 

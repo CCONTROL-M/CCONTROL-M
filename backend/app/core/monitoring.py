@@ -1,12 +1,12 @@
 """
-Sistema de monitoramento integrado com Prometheus para o backend CCONTROL-M.
+Sistema de monitoramento integrado para o backend CCONTROL-M.
 
-Este módulo implementa as métricas Prometheus para monitoramento da API,
+Este módulo implementa métricas para monitoramento da API,
 incluindo contadores de requisições, tempos de resposta e erros.
 """
 import time
 from fastapi import FastAPI, Request, Response
-from prometheus_client import Counter, Histogram, Gauge, Summary, generate_latest, CONTENT_TYPE_LATEST
+from prometheus_client import Counter, Histogram, Gauge, Summary
 from contextlib import contextmanager
 from typing import Callable, List, Dict, Any, Optional
 import psutil
@@ -14,6 +14,7 @@ import os
 from fastapi.routing import APIRoute
 
 from app.utils.logging_config import get_logger
+from app.config.metrics import get_metrics_prometheus, get_metrics_dict, reset_metrics
 
 # Configurar logger
 logger = get_logger(__name__)
@@ -71,6 +72,9 @@ API_SENSITIVE_OPERATIONS = Counter(
     'Total de operações sensíveis na API',
     ['user_id', 'resource_type', 'action']
 )
+
+# Exportar as funções do módulo metrics para manter compatibilidade
+__all__ = ['get_metrics_prometheus', 'get_metrics_dict', 'reset_metrics']
 
 
 class PrometheusMiddleware:
@@ -282,12 +286,12 @@ async def metrics_endpoint() -> Response:
     monitor_system_resources()
     
     # Gerar métricas
-    metrics = generate_latest()
+    metrics = get_metrics_prometheus()
     
     # Retornar como response
     return Response(
         content=metrics,
-        media_type=CONTENT_TYPE_LATEST
+        media_type="text/plain; version=0.0.4"
     )
 
 

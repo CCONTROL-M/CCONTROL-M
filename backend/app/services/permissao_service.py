@@ -3,20 +3,30 @@ from uuid import UUID
 from typing import Dict, Any, List, Optional, Tuple
 from fastapi import Depends, HTTPException, status
 import logging
+from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.schemas.permissao_usuario import PermissaoUsuarioCreate, PermissaoUsuarioUpdate, PermissaoUsuario
 from app.repositories.permissao_usuario_repository import PermissaoUsuarioRepository
-from app.services.log_sistema_service import LogSistemaService
-from app.schemas.log_sistema import LogSistemaCreate
-from app.database import db_session
+from app.services.auditoria_service import AuditoriaService
+from app.repositories.permissao_repository import PermissaoRepository
+from app.schemas.permissao import PermissaoCreate, PermissaoUpdate, Permissao
+from app.schemas.pagination import PaginatedResponse
+from app.database import get_async_session, db_async_session
+
+logger = logging.getLogger(__name__)
 
 
 class PermissaoService:
     """Serviço para gerenciamento de permissões de usuário."""
     
-    def __init__(self):
-        """Inicializar serviço."""
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, 
+                 session: AsyncSession = Depends(get_async_session),
+                 auditoria_service: AuditoriaService = Depends()):
+        """Inicializar serviço com repositórios."""
+        self.repository = PermissaoUsuarioRepository(session)
+        self.auditoria_service = auditoria_service
+        self.logger = logger
         
     async def criar_permissao(
         self, 
@@ -40,9 +50,9 @@ class PermissaoService:
         """
         self.logger.info(f"Criando permissão para usuário {permissao.id_usuario} no recurso {permissao.recurso}")
         
-        async with db_session() as session:
+        async with get_async_session() as session:
             # Verificar se já existe permissão para este usuário e recurso
-            permissao_repo = PermissaoUsuarioRepository()
+            permissao_repo = PermissaoUsuarioRepository(session)
             
             existing = await permissao_repo.get_by_user_and_resource(
                 user_id=permissao.id_usuario,
@@ -67,12 +77,18 @@ class PermissaoService:
                     tenant_id=id_empresa
                 )
                 
-                # Registrar log da operação
-                await self._registrar_log(
-                    id_empresa=id_empresa,
-                    id_usuario=id_usuario_admin,
-                    acao="permissao:criacao",
-                    descricao=f"Permissão criada para usuário {permissao.id_usuario} no recurso {permissao.recurso}"
+                # Registrar ação
+                await self.auditoria_service.registrar_acao(
+                    usuario_id=id_usuario_admin,
+                    acao="CRIAR_PERMISSAO",
+                    detalhes={
+                        "id_permissao": str(nova_permissao.id_permissao),
+                        "id_usuario": str(nova_permissao.id_usuario),
+                        "recurso": nova_permissao.recurso,
+                        "acoes": nova_permissao.acoes,
+                        "descricao": f"Permissão criada para usuário {permissao.id_usuario} no recurso {permissao.recurso}"
+                    },
+                    empresa_id=id_empresa
                 )
                 
                 return nova_permissao
@@ -107,8 +123,8 @@ class PermissaoService:
         """
         self.logger.info(f"Atualizando permissão {id_permissao}")
         
-        async with db_session() as session:
-            permissao_repo = PermissaoUsuarioRepository()
+        async with get_async_session() as session:
+            permissao_repo = PermissaoUsuarioRepository(session)
             
             # Verificar se a permissão existe
             existing = await permissao_repo.get_by_id(
@@ -131,15 +147,18 @@ class PermissaoService:
                     tenant_id=id_empresa
                 )
                 
-                # Registrar log da operação
-                await self._registrar_log(
-                    id_empresa=id_empresa,
-                    id_usuario=id_usuario_admin,
-                    acao="permissao:atualizacao",
-                    descricao=(
-                        f"Permissão {id_permissao} atualizada. "
-                        f"Recurso: {permissao.recurso if permissao.recurso else existing.recurso}"
-                    )
+                # Registrar no log
+                await self.auditoria_service.registrar_acao(
+                    usuario_id=id_usuario_admin,
+                    acao="ATUALIZAR_PERMISSAO",
+                    detalhes={
+                        "id_permissao": str(id_permissao),
+                        "id_usuario": str(permissao_atualizada.id_usuario),
+                        "recurso": permissao_atualizada.recurso,
+                        "acoes": permissao_atualizada.acoes,
+                        "descricao": f"Permissão atualizada para usuário {permissao_atualizada.id_usuario} no recurso {permissao_atualizada.recurso}"
+                    },
+                    empresa_id=id_empresa
                 )
                 
                 return permissao_atualizada
@@ -172,8 +191,8 @@ class PermissaoService:
         """
         self.logger.info(f"Removendo permissão {id_permissao}")
         
-        async with db_session() as session:
-            permissao_repo = PermissaoUsuarioRepository()
+        async with get_async_session() as session:
+            permissao_repo = PermissaoUsuarioRepository(session)
             
             # Verificar se a permissão existe
             existing = await permissao_repo.get_by_id(
@@ -188,23 +207,24 @@ class PermissaoService:
                     detail="Permissão não encontrada"
                 )
             
-            # Armazenar informações para log antes de remover
-            id_usuario = existing.id_usuario
-            recurso = existing.recurso
+            # Registrar log
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario_admin,
+                acao="EXCLUIR_PERMISSAO",
+                detalhes={
+                    "id_permissao": str(id_permissao),
+                    "id_usuario": str(existing.id_usuario),
+                    "recurso": existing.recurso,
+                    "descricao": f"Permissão excluída para usuário {existing.id_usuario} no recurso {existing.recurso}"
+                },
+                empresa_id=id_empresa
+            )
             
             # Remover a permissão
             try:
                 await permissao_repo.delete(
                     id=id_permissao,
                     tenant_id=id_empresa
-                )
-                
-                # Registrar log da operação
-                await self._registrar_log(
-                    id_empresa=id_empresa,
-                    id_usuario=id_usuario_admin,
-                    acao="permissao:remocao",
-                    descricao=f"Permissão removida para usuário {id_usuario} no recurso {recurso}"
                 )
                 
                 return {"detail": "Permissão removida com sucesso"}
@@ -236,8 +256,8 @@ class PermissaoService:
         """
         self.logger.info(f"Listando permissões para usuário {id_usuario}")
         
-        async with db_session() as session:
-            permissao_repo = PermissaoUsuarioRepository()
+        async with get_async_session() as session:
+            permissao_repo = PermissaoUsuarioRepository(session)
             
             # Obter todas as permissões do usuário
             permissoes = await permissao_repo.get_by_user_id(
@@ -270,8 +290,8 @@ class PermissaoService:
         """
         self.logger.info(f"Listando todas as permissões para empresa {id_empresa}")
         
-        async with db_session() as session:
-            permissao_repo = PermissaoUsuarioRepository()
+        async with get_async_session() as session:
+            permissao_repo = PermissaoUsuarioRepository(session)
             
             # Obter todas as permissões
             todas_permissoes = await permissao_repo.get_all(tenant_id=id_empresa)
@@ -302,8 +322,8 @@ class PermissaoService:
         """
         self.logger.info(f"Obtendo permissão {id_permissao}")
         
-        async with db_session() as session:
-            permissao_repo = PermissaoUsuarioRepository()
+        async with get_async_session() as session:
+            permissao_repo = PermissaoUsuarioRepository(session)
             
             permissao = await permissao_repo.get_by_id(
                 id=id_permissao,
@@ -343,8 +363,8 @@ class PermissaoService:
             f"no recurso {recurso}, ação {acao}"
         )
         
-        async with db_session() as session:
-            permissao_repo = PermissaoUsuarioRepository()
+        async with get_async_session() as session:
+            permissao_repo = PermissaoUsuarioRepository(session)
             
             # Verificar permissão
             tem_permissao = await permissao_repo.check_user_permission(
@@ -354,37 +374,4 @@ class PermissaoService:
                 tenant_id=id_empresa
             )
             
-            return tem_permissao
-    
-    async def _registrar_log(
-        self,
-        id_empresa: UUID,
-        id_usuario: UUID,
-        acao: str,
-        descricao: str
-    ) -> None:
-        """
-        Registrar um log de operação.
-        
-        Args:
-            id_empresa: ID da empresa
-            id_usuario: ID do usuário que realizou a ação
-            acao: Tipo de ação realizada
-            descricao: Descrição detalhada da ação
-        """
-        try:
-            log_service = LogSistemaService()
-            
-            log_data = LogSistemaCreate(
-                id_empresa=id_empresa,
-                id_usuario=id_usuario,
-                acao=acao,
-                descricao=descricao,
-                ip="sistema",
-                user_agent="sistema"
-            )
-            
-            await log_service.registrar_log(log_data)
-        except Exception as e:
-            self.logger.error(f"Erro ao registrar log: {str(e)}")
-            # Não lançar exceção para não interromper o fluxo principal 
+            return tem_permissao 

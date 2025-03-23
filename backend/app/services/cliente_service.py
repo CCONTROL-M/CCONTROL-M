@@ -1,22 +1,33 @@
 """Serviço para gerenciamento de clientes no sistema CCONTROL-M."""
 from uuid import UUID
 from typing import Dict, Any, List, Optional, Tuple
-from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
+from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi import HTTPException, status, Depends
 import logging
+from datetime import datetime
 
 from app.schemas.cliente import ClienteCreate, ClienteUpdate, Cliente
 from app.repositories.cliente_repository import ClienteRepository
-from app.database import db_session
+from app.database import get_async_session
 from app.utils.validators import validar_cpf_cnpj
+from app.schemas.pagination import PaginatedResponse
+from app.services.auditoria_service import AuditoriaService
+
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 
 class ClienteService:
     """Serviço para gerenciamento de clientes."""
     
-    def __init__(self):
-        """Inicializar o serviço."""
-        self.logger = logging.getLogger(__name__)
+    def __init__(self, 
+                 session: AsyncSession = Depends(get_async_session),
+                 auditoria_service: AuditoriaService = Depends()):
+        """Inicializar serviço com repositórios."""
+        self.repository = ClienteRepository(session)
+        self.auditoria_service = auditoria_service
+        self.logger = logger
     
     async def get_cliente(self, id_cliente: UUID, id_empresa: UUID) -> Cliente:
         """
@@ -32,7 +43,7 @@ class ClienteService:
         Raises:
             HTTPException: Se o cliente não for encontrado ou não pertencer à empresa
         """
-        async with db_session() as session:
+        async with get_async_session() as session:
             repository = ClienteRepository(session)
             cliente = await repository.get_by_id(id_cliente, id_empresa)
             
@@ -76,7 +87,7 @@ class ClienteService:
         Returns:
             Tuple[List[Cliente], int]: Lista de clientes e contagem total
         """
-        async with db_session() as session:
+        async with get_async_session() as session:
             repository = ClienteRepository(session)
             
             # Construir filtros
@@ -111,7 +122,7 @@ class ClienteService:
         Raises:
             HTTPException: Se houver erro de validação ou conflito
         """
-        async with db_session() as session:
+        async with get_async_session() as session:
             repository = ClienteRepository(session)
             
             # Validar CPF/CNPJ
@@ -154,7 +165,7 @@ class ClienteService:
         Raises:
             HTTPException: Se o cliente não for encontrado ou houver erro de validação
         """
-        async with db_session() as session:
+        async with get_async_session() as session:
             repository = ClienteRepository(session)
             
             # Verificar se o cliente existe e pertence à empresa
@@ -218,7 +229,7 @@ class ClienteService:
         Raises:
             HTTPException: Se o cliente não for encontrado ou não puder ser removido
         """
-        async with db_session() as session:
+        async with get_async_session() as session:
             repository = ClienteRepository(session)
             
             # Verificar se o cliente existe e pertence à empresa
@@ -245,4 +256,269 @@ class ClienteService:
             self.logger.info(f"Removendo cliente ID={id_cliente}, nome={cliente.nome}")
             await repository.delete(id_cliente, id_empresa)
             
-            return {"message": "Cliente removido com sucesso"} 
+            return {"message": "Cliente removido com sucesso"}
+
+    async def create(
+        self,
+        cliente: ClienteCreate,
+        usuario_id: UUID,
+        empresa_id: UUID
+    ) -> Cliente:
+        """
+        Criar um novo cliente.
+        
+        Args:
+            cliente: Dados do cliente a ser criado
+            usuario_id: ID do usuário que está criando
+            empresa_id: ID da empresa
+            
+        Returns:
+            Cliente criado
+            
+        Raises:
+            HTTPException: Se houver erro na criação
+        """
+        try:
+            # Verificar se documento já existe
+            if await self.repository.get_by_documento(cliente.documento, empresa_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Documento já cadastrado"
+                )
+            
+            # Criar cliente
+            novo_cliente = await self.repository.create(cliente, empresa_id)
+            
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="CRIAR_CLIENTE",
+                detalhes={
+                    "id_cliente": str(novo_cliente.id_cliente),
+                    "nome": novo_cliente.nome,
+                    "tipo": novo_cliente.tipo,
+                    "documento": novo_cliente.documento
+                },
+                empresa_id=empresa_id
+            )
+            
+            return novo_cliente
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Erro ao criar cliente: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao criar cliente"
+            )
+
+    async def update(
+        self,
+        id_cliente: UUID,
+        cliente: ClienteUpdate,
+        usuario_id: UUID,
+        empresa_id: UUID
+    ) -> Cliente:
+        """
+        Atualizar um cliente existente.
+        
+        Args:
+            id_cliente: ID do cliente a ser atualizado
+            cliente: Dados atualizados do cliente
+            usuario_id: ID do usuário que está atualizando
+            empresa_id: ID da empresa
+            
+        Returns:
+            Cliente atualizado
+            
+        Raises:
+            HTTPException: Se houver erro na atualização
+        """
+        try:
+            # Buscar cliente existente
+            cliente_atual = await self.repository.get_by_id(id_cliente)
+            if not cliente_atual:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Cliente não encontrado"
+                )
+            
+            # Verificar documento se alterado
+            if cliente.documento and cliente.documento != cliente_atual.documento:
+                if await self.repository.get_by_documento(cliente.documento, empresa_id):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Documento já cadastrado"
+                    )
+            
+            # Atualizar cliente
+            cliente_atualizado = await self.repository.update(id_cliente, cliente)
+            
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="ATUALIZAR_CLIENTE",
+                detalhes={
+                    "id_cliente": str(id_cliente),
+                    "alteracoes": cliente.model_dump(exclude_unset=True)
+                },
+                empresa_id=empresa_id
+            )
+            
+            return cliente_atualizado
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Erro ao atualizar cliente: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao atualizar cliente"
+            )
+
+    async def delete(
+        self,
+        id_cliente: UUID,
+        usuario_id: UUID,
+        empresa_id: UUID
+    ) -> None:
+        """
+        Excluir um cliente.
+        
+        Args:
+            id_cliente: ID do cliente a ser excluído
+            usuario_id: ID do usuário que está excluindo
+            empresa_id: ID da empresa
+            
+        Raises:
+            HTTPException: Se houver erro na exclusão
+        """
+        try:
+            # Buscar cliente
+            cliente = await self.repository.get_by_id(id_cliente)
+            if not cliente:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Cliente não encontrado"
+                )
+            
+            # Excluir cliente
+            await self.repository.delete(id_cliente)
+            
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="EXCLUIR_CLIENTE",
+                detalhes={
+                    "id_cliente": str(id_cliente),
+                    "nome": cliente.nome,
+                    "tipo": cliente.tipo,
+                    "documento": cliente.documento
+                },
+                empresa_id=empresa_id
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Erro ao excluir cliente: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao excluir cliente"
+            )
+
+    async def get_by_id(
+        self,
+        id_cliente: UUID,
+        usuario_id: UUID,
+        empresa_id: UUID
+    ) -> Cliente:
+        """
+        Buscar um cliente pelo ID.
+        
+        Args:
+            id_cliente: ID do cliente a ser buscado
+            usuario_id: ID do usuário que está buscando
+            empresa_id: ID da empresa
+            
+        Returns:
+            Cliente encontrado
+            
+        Raises:
+            HTTPException: Se o cliente não for encontrado
+        """
+        try:
+            cliente = await self.repository.get_by_id(id_cliente)
+            if not cliente:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Cliente não encontrado"
+                )
+                
+            # Registrar ação de consulta
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="CONSULTAR_CLIENTE",
+                detalhes={"id_cliente": str(id_cliente)},
+                empresa_id=empresa_id
+            )
+                
+            return cliente
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Erro ao buscar cliente: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao buscar cliente"
+            )
+
+    async def get_multi(
+        self,
+        empresa_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        tipo: Optional[str] = None,
+        status: Optional[str] = None,
+        busca: Optional[str] = None
+    ) -> PaginatedResponse[Cliente]:
+        """
+        Buscar múltiplos clientes com filtros.
+        
+        Args:
+            empresa_id: ID da empresa
+            skip: Número de registros para pular
+            limit: Número máximo de registros
+            tipo: Filtrar por tipo de cliente
+            status: Filtrar por status
+            busca: Termo para busca
+            
+        Returns:
+            Lista paginada de clientes
+        """
+        try:
+            clientes, total = await self.repository.get_multi(
+                empresa_id=empresa_id,
+                skip=skip,
+                limit=limit,
+                tipo=tipo,
+                status=status,
+                busca=busca
+            )
+            
+            return PaginatedResponse(
+                items=clientes,
+                total=total,
+                page=skip // limit + 1 if limit > 0 else 1,
+                size=limit,
+                pages=(total + limit - 1) // limit if limit > 0 else 1
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao buscar clientes: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao buscar clientes"
+            ) 

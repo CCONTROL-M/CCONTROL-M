@@ -1,6 +1,6 @@
 FROM python:3.11-slim
 
-LABEL maintainer="CCONTROL-M <contato@seudominio.com.br>"
+LABEL maintainer="CCONTROL-M <contato@ccontrol-m.com.br>"
 LABEL description="API Backend para CCONTROL-M - Sistema de Controle Financeiro e Gestão"
 
 # Definir variáveis de ambiente

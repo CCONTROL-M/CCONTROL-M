@@ -5,20 +5,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status
 import logging
 from passlib.hash import bcrypt
+from datetime import datetime
 
 from app.schemas.usuario import UsuarioCreate, UsuarioUpdate, Usuario
 from app.repositories.usuario_repository import UsuarioRepository
 from app.database import get_async_session
 from app.utils.validators import validar_email
+from app.schemas.pagination import PaginatedResponse
+from app.services.auditoria_service import AuditoriaService
+from app.utils.security import get_password_hash
+
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 
 class UsuarioService:
     """Serviço para gerenciamento de usuários."""
     
-    def __init__(self, session: AsyncSession = Depends(get_async_session)):
-        """Inicializar serviço com repositório."""
+    def __init__(self, 
+                 session: AsyncSession = Depends(get_async_session),
+                 auditoria_service: AuditoriaService = Depends()):
+        """Inicializar serviço com repositórios."""
         self.repository = UsuarioRepository(session)
-        self.logger = logging.getLogger(__name__)
+        self.auditoria_service = auditoria_service
+        self.logger = logger
         
     async def get_usuario(self, id_usuario: UUID, id_empresa: Optional[UUID] = None) -> Usuario:
         """
@@ -339,4 +350,276 @@ class UsuarioService:
             self.logger.warning(f"Senha incorreta para usuário: {email}")
             return None
             
-        return usuario 
+        return usuario
+
+    async def create(
+        self,
+        usuario: UsuarioCreate,
+        usuario_id: UUID,
+        empresa_id: UUID
+    ) -> Usuario:
+        """
+        Criar um novo usuário.
+        
+        Args:
+            usuario: Dados do usuário a ser criado
+            usuario_id: ID do usuário que está criando
+            empresa_id: ID da empresa
+            
+        Returns:
+            Usuário criado
+            
+        Raises:
+            HTTPException: Se houver erro na criação
+        """
+        try:
+            # Verificar se email já existe
+            if await self.repository.get_by_email(usuario.email):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Email já cadastrado"
+                )
+            
+            # Hash da senha
+            usuario.senha = get_password_hash(usuario.senha)
+            
+            # Criar usuário
+            novo_usuario = await self.repository.create(usuario, empresa_id)
+            
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="CRIAR_USUARIO",
+                detalhes={
+                    "id_usuario": str(novo_usuario.id_usuario),
+                    "nome": novo_usuario.nome,
+                    "email": novo_usuario.email,
+                    "tipo": novo_usuario.tipo
+                },
+                empresa_id=empresa_id
+            )
+            
+            return novo_usuario
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Erro ao criar usuário: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao criar usuário"
+            )
+
+    async def update(
+        self,
+        id_usuario: UUID,
+        usuario: UsuarioUpdate,
+        usuario_id: UUID,
+        empresa_id: UUID
+    ) -> Usuario:
+        """
+        Atualizar um usuário existente.
+        
+        Args:
+            id_usuario: ID do usuário a ser atualizado
+            usuario: Dados atualizados do usuário
+            usuario_id: ID do usuário que está atualizando
+            empresa_id: ID da empresa
+            
+        Returns:
+            Usuário atualizado
+            
+        Raises:
+            HTTPException: Se houver erro na atualização
+        """
+        try:
+            # Buscar usuário existente
+            usuario_atual = await self.repository.get_by_id(id_usuario)
+            if not usuario_atual:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Usuário não encontrado"
+                )
+            
+            # Verificar email se alterado
+            if usuario.email and usuario.email != usuario_atual.email:
+                if await self.repository.get_by_email(usuario.email):
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Email já cadastrado"
+                    )
+            
+            # Hash da senha se alterada
+            if usuario.senha:
+                usuario.senha = get_password_hash(usuario.senha)
+            
+            # Atualizar usuário
+            usuario_atualizado = await self.repository.update(id_usuario, usuario)
+            
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="ATUALIZAR_USUARIO",
+                detalhes={
+                    "id_usuario": str(id_usuario),
+                    "alteracoes": usuario.model_dump(exclude={"senha"}, exclude_unset=True)
+                },
+                empresa_id=empresa_id
+            )
+            
+            return usuario_atualizado
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Erro ao atualizar usuário: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao atualizar usuário"
+            )
+
+    async def delete(
+        self,
+        id_usuario: UUID,
+        usuario_id: UUID,
+        empresa_id: UUID
+    ) -> None:
+        """
+        Excluir um usuário.
+        
+        Args:
+            id_usuario: ID do usuário a ser excluído
+            usuario_id: ID do usuário que está excluindo
+            empresa_id: ID da empresa
+            
+        Raises:
+            HTTPException: Se houver erro na exclusão
+        """
+        try:
+            # Buscar usuário
+            usuario = await self.repository.get_by_id(id_usuario)
+            if not usuario:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Usuário não encontrado"
+                )
+            
+            # Excluir usuário
+            await self.repository.delete(id_usuario)
+            
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="EXCLUIR_USUARIO",
+                detalhes={
+                    "id_usuario": str(id_usuario),
+                    "nome": usuario.nome,
+                    "email": usuario.email,
+                    "tipo": usuario.tipo
+                },
+                empresa_id=empresa_id
+            )
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Erro ao excluir usuário: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao excluir usuário"
+            )
+
+    async def get_by_id(
+        self,
+        id_usuario: UUID,
+        usuario_id: UUID,
+        empresa_id: UUID
+    ) -> Usuario:
+        """
+        Buscar um usuário pelo ID.
+        
+        Args:
+            id_usuario: ID do usuário a ser buscado
+            usuario_id: ID do usuário que está buscando
+            empresa_id: ID da empresa
+            
+        Returns:
+            Usuário encontrado
+            
+        Raises:
+            HTTPException: Se o usuário não for encontrado
+        """
+        try:
+            usuario = await self.repository.get_by_id(id_usuario)
+            if not usuario:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Usuário não encontrado"
+                )
+                
+            # Registrar ação de consulta
+            await self.auditoria_service.registrar_acao(
+                usuario_id=usuario_id,
+                acao="CONSULTAR_USUARIO",
+                detalhes={"id_usuario": str(id_usuario)},
+                empresa_id=empresa_id
+            )
+                
+            return usuario
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Erro ao buscar usuário: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao buscar usuário"
+            )
+
+    async def get_multi(
+        self,
+        empresa_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        tipo: Optional[str] = None,
+        status: Optional[str] = None,
+        busca: Optional[str] = None
+    ) -> PaginatedResponse[Usuario]:
+        """
+        Buscar múltiplos usuários com filtros.
+        
+        Args:
+            empresa_id: ID da empresa
+            skip: Número de registros para pular
+            limit: Número máximo de registros
+            tipo: Filtrar por tipo de usuário
+            status: Filtrar por status
+            busca: Termo para busca
+            
+        Returns:
+            Lista paginada de usuários
+        """
+        try:
+            usuarios, total = await self.repository.get_multi(
+                empresa_id=empresa_id,
+                skip=skip,
+                limit=limit,
+                tipo=tipo,
+                status=status,
+                busca=busca
+            )
+            
+            return PaginatedResponse(
+                items=usuarios,
+                total=total,
+                page=skip // limit + 1 if limit > 0 else 1,
+                size=limit,
+                pages=(total + limit - 1) // limit if limit > 0 else 1
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao buscar usuários: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao buscar usuários"
+            ) 

@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status
 import logging
+from datetime import datetime
 
 from app.schemas.categoria import CategoriaCreate, CategoriaUpdate, Categoria
 from app.repositories.categoria_repository import CategoriaRepository
@@ -11,6 +12,13 @@ from app.repositories.lancamento_repository import LancamentoRepository
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
 from app.database import get_async_session
+from app.models.categoria import Categoria as CategoriaModel
+from app.schemas.pagination import PaginatedResponse
+from app.services.auditoria_service import AuditoriaService
+
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 
 class CategoriaService:
@@ -18,12 +26,14 @@ class CategoriaService:
     
     def __init__(self, 
                  session: AsyncSession = Depends(get_async_session),
-                 log_service: LogSistemaService = Depends()):
+                 log_service: LogSistemaService = Depends(),
+                 auditoria_service: AuditoriaService = Depends()):
         """Inicializar serviço com repositórios."""
         self.repository = CategoriaRepository(session)
         self.lancamento_repository = LancamentoRepository(session)
         self.log_service = log_service
-        self.logger = logging.getLogger(__name__)
+        self.auditoria_service = auditoria_service
+        self.logger = logger
         
     async def get_categoria(self, id_categoria: UUID, id_empresa: UUID) -> Categoria:
         """
@@ -148,6 +158,18 @@ class CategoriaService:
                 )
             )
             
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="CRIAR_CATEGORIA",
+                detalhes={
+                    "id_categoria": str(nova_categoria.id_categoria),
+                    "nome": nova_categoria.nome,
+                    "tipo": nova_categoria.tipo
+                },
+                empresa_id=categoria.id_empresa
+            )
+            
             return nova_categoria
         except Exception as e:
             self.logger.error(f"Erro ao criar categoria: {str(e)}")
@@ -223,6 +245,17 @@ class CategoriaService:
                 )
             )
             
+            # Registrar ação
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="ATUALIZAR_CATEGORIA",
+                detalhes={
+                    "id_categoria": str(id_categoria),
+                    "alteracoes": update_data
+                },
+                empresa_id=id_empresa
+            )
+            
             return categoria_atualizada
         except Exception as e:
             self.logger.error(f"Erro ao atualizar categoria: {str(e)}")
@@ -272,6 +305,14 @@ class CategoriaService:
             )
         )
         
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="ATIVAR_CATEGORIA",
+            detalhes={"id_categoria": str(id_categoria)},
+            empresa_id=id_empresa
+        )
+        
         return categoria_atualizada
         
     async def desativar_categoria(self, id_categoria: UUID, id_empresa: UUID, id_usuario: UUID) -> Categoria:
@@ -313,6 +354,14 @@ class CategoriaService:
                 descricao=f"Categoria desativada: {categoria.nome}",
                 dados={"id_categoria": str(id_categoria)}
             )
+        )
+        
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="DESATIVAR_CATEGORIA",
+            detalhes={"id_categoria": str(id_categoria)},
+            empresa_id=id_empresa
         )
         
         return categoria_atualizada
@@ -364,4 +413,64 @@ class CategoriaService:
             )
         )
         
-        return {"detail": f"Categoria '{categoria.nome}' removida com sucesso"} 
+        # Registrar ação
+        await self.auditoria_service.registrar_acao(
+            usuario_id=id_usuario,
+            acao="EXCLUIR_CATEGORIA",
+            detalhes={
+                "id_categoria": str(id_categoria),
+                "nome": categoria.nome,
+                "tipo": categoria.tipo
+            },
+            empresa_id=id_empresa
+        )
+        
+        return {"detail": f"Categoria '{categoria.nome}' removida com sucesso"}
+
+    async def get_multi(
+        self,
+        empresa_id: UUID,
+        skip: int = 0,
+        limit: int = 100,
+        tipo: Optional[str] = None,
+        status: Optional[str] = None,
+        busca: Optional[str] = None
+    ) -> PaginatedResponse[Categoria]:
+        """
+        Buscar múltiplas categorias com filtros.
+        
+        Args:
+            empresa_id: ID da empresa
+            skip: Número de registros para pular
+            limit: Número máximo de registros
+            tipo: Filtrar por tipo
+            status: Filtrar por status
+            busca: Termo para busca
+            
+        Returns:
+            Lista paginada de categorias
+        """
+        try:
+            categorias, total = await self.repository.get_multi(
+                empresa_id=empresa_id,
+                skip=skip,
+                limit=limit,
+                tipo=tipo,
+                status=status,
+                busca=busca
+            )
+            
+            return PaginatedResponse(
+                items=categorias,
+                total=total,
+                page=skip // limit + 1 if limit > 0 else 1,
+                size=limit,
+                pages=(total + limit - 1) // limit if limit > 0 else 1
+            )
+            
+        except Exception as e:
+            self.logger.error(f"Erro ao buscar categorias: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao buscar categorias"
+            ) 

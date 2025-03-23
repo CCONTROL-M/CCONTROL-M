@@ -33,7 +33,7 @@ class LogSistema(LogSistemaInDB):
     """Schema para representação de logs do sistema nas respostas da API."""
     
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 
 class LogSistemaList(PaginatedResponse):

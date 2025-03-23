@@ -1,6 +1,6 @@
 '''
 Router de Clientes para o sistema CCONTROL-M.
-Implementa as operações CRUD protegidas por JWT, com filtros, paginação e uso de serviço.
+Implementa as operações CRUD protegidas por JWT, com filtros, paginação, validações avançadas e uso de serviço.
 '''
 
 import logging
@@ -8,19 +8,19 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from uuid import UUID
 from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime
 
-from app.schemas.cliente import (
-    Cliente, ClienteCreate, ClienteUpdate, ClienteList
-)
-from app.schemas.pagination import PaginatedResponse
-from app.services.cliente_service import ClienteService
-from app.services.log_sistema_service import LogSistemaService
-from app.schemas.token import TokenPayload
-from app.models.usuario import Usuario
-from app.dependencies import get_current_user
 from app.database import get_async_session
+from app.schemas.cliente import Cliente, ClienteCreate, ClienteUpdate, ClienteList
+from app.dependencies import get_current_user
 from app.utils.permissions import require_permission
+from app.services.cliente_service import ClienteService
+from app.schemas.token import TokenPayload
+from app.utils.validators import validar_cpf_cnpj, formatar_cpf_cnpj
+from app.schemas.cliente_validado import SituacaoCliente
+from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
+from app.utils.logging_config import get_logger
 from app.utils.error_responses import (
     resource_not_found, 
     validation_error, 
@@ -29,12 +29,12 @@ from app.utils.error_responses import (
     ErrorDetail
 )
 
-# Configuração de logger
-logger = logging.getLogger(__name__)
+# Configurar logger
+logger = get_logger(__name__)
 
 router = APIRouter(
     prefix="/clientes",
-    tags=["Clientes"],
+    tags=["clientes"],
     responses={
         status.HTTP_400_BAD_REQUEST: {
             "description": "Erro de requisição inválida",

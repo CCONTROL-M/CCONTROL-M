@@ -4,24 +4,32 @@ from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status, Depends
 import logging
+from datetime import datetime
 
 from app.schemas.fornecedor import FornecedorCreate, FornecedorUpdate, Fornecedor
 from app.repositories.fornecedor_repository import FornecedorRepository
 from app.database import db_async_session, get_async_session
-from app.utils.validators import validar_cnpj
+from app.utils.validators import validar_cnpj, validar_email, validar_telefone, formatar_cnpj
 from app.services.log_sistema_service import LogSistemaService
 from app.schemas.log_sistema import LogSistemaCreate
+from app.schemas.pagination import PaginatedResponse
+from app.services.auditoria_service import AuditoriaService
+
+
+# Configurar logger
+logger = logging.getLogger(__name__)
 
 
 class FornecedorService:
     """Serviço para gerenciamento de fornecedores."""
     
-    def __init__(self, session: AsyncSession = Depends(get_async_session),
-                log_service: LogSistemaService = Depends()):
-        """Inicializar o serviço."""
+    def __init__(self, 
+                 session: AsyncSession = Depends(get_async_session),
+                 auditoria_service: AuditoriaService = Depends()):
+        """Inicializar serviço com repositórios."""
         self.repository = FornecedorRepository(session)
-        self.log_service = log_service
-        self.logger = logging.getLogger(__name__)
+        self.auditoria_service = auditoria_service
+        self.logger = logger
     
     async def get_fornecedor(self, id_fornecedor: UUID, id_empresa: UUID) -> Fornecedor:
         """
@@ -120,51 +128,80 @@ class FornecedorService:
             Fornecedor criado
             
         Raises:
-            HTTPException: Se houver erro de validação ou conflito
+            HTTPException: Se houver erro de validação
         """
-        self.logger.info(f"Criando fornecedor: {fornecedor.nome}, CNPJ: {fornecedor.cnpj}")
+        self.logger.info(f"Criando fornecedor: {fornecedor.nome}")
         
         try:
             # Validar CNPJ
-            if not validar_cnpj(fornecedor.cnpj):
-                self.logger.warning(f"CNPJ inválido: {fornecedor.cnpj}")
+            if fornecedor.cnpj:
+                if not validar_cnpj(fornecedor.cnpj):
+                    self.logger.warning(f"CNPJ inválido: {fornecedor.cnpj}")
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="CNPJ inválido"
+                    )
+                
+                # Verificar se o CNPJ já está em uso
+                existente = await self.repository.get_by_cnpj_empresa(
+                    cnpj=fornecedor.cnpj, 
+                    id_empresa=fornecedor.id_empresa
+                )
+                
+                if existente:
+                    self.logger.warning(f"CNPJ já cadastrado: {fornecedor.cnpj}")
+                    raise HTTPException(
+                        status_code=status.HTTP_409_CONFLICT,
+                        detail="CNPJ já cadastrado para outro fornecedor"
+                    )
+            
+            # Validar e-mail, se fornecido
+            if fornecedor.email and not validar_email(fornecedor.email):
+                self.logger.warning(f"E-mail inválido: {fornecedor.email}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="CNPJ inválido"
+                    detail="E-mail inválido"
                 )
             
-            # Verificar se já existe fornecedor com mesmo CNPJ na empresa
-            existente = await self.repository.get_by_cnpj_empresa(
-                cnpj=fornecedor.cnpj, 
-                id_empresa=fornecedor.id_empresa
-            )
-            
-            if existente:
-                self.logger.warning(f"CNPJ já cadastrado: {fornecedor.cnpj}")
+            # Validar telefone, se fornecido
+            if fornecedor.telefone and not validar_telefone(fornecedor.telefone):
+                self.logger.warning(f"Telefone inválido: {fornecedor.telefone}")
                 raise HTTPException(
-                    status_code=status.HTTP_409_CONFLICT,
-                    detail="CNPJ já cadastrado para outro fornecedor nesta empresa"
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Telefone em formato inválido"
                 )
+            
+            # Formatar documento se necessário
+            if fornecedor.cnpj:
+                fornecedor.cnpj = formatar_cnpj(fornecedor.cnpj)
+            
+            # Preparar dados para criação
+            fornecedor_data = fornecedor.model_dump()
+            
+            # Adicionar metadados
+            fornecedor_data.update({
+                "id_fornecedor": uuid4(),
+                "created_at": datetime.now(),
+                "updated_at": datetime.now(),
+                "ativo": True  # Por padrão, fornecedor é criado como ativo
+            })
             
             # Criar fornecedor
-            fornecedor_dict = fornecedor.model_dump(exclude_unset=True)
-            novo_fornecedor = await self.repository.create(fornecedor_dict)
+            fornecedor_obj = await self.repository.create(fornecedor_data)
             
-            # Registrar log
-            log = LogSistemaCreate(
-                acao="criar",
-                tabela="fornecedores",
-                id_registro=str(novo_fornecedor.id_fornecedor),
-                id_usuario=id_usuario,
-                id_empresa=fornecedor.id_empresa,
-                detalhes=f"Fornecedor {novo_fornecedor.nome} criado"
+            # Registrar auditoria
+            await self.auditoria_service.registrar_auditoria(
+                usuario_id=id_usuario,
+                empresa_id=fornecedor.id_empresa,
+                acao="Criação de fornecedor",
+                recurso="fornecedor",
+                recurso_id=str(fornecedor_obj.id_fornecedor),
+                dados_novos=fornecedor_data,
+                ip_address="127.0.0.1",  # Idealmente deve vir do request
+                detalhes=f"Criação do fornecedor {fornecedor.nome}"
             )
-            await self.log_service.registrar_log(log)
             
-            # Comitar alterações
-            await self.repository.commit()
-            
-            return novo_fornecedor
+            return fornecedor_obj
         except HTTPException:
             await self.repository.rollback()
             raise
@@ -251,7 +288,15 @@ class FornecedorService:
                 id_empresa=id_empresa,
                 detalhes=f"Fornecedor {fornecedor_atualizado.nome} atualizado"
             )
-            await self.log_service.registrar_log(log)
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="ATUALIZAR_FORNECEDOR",
+                detalhes={
+                    "id_fornecedor": str(id_fornecedor),
+                    "alteracoes": fornecedor.model_dump(exclude_unset=True)
+                },
+                empresa_id=id_empresa
+            )
             
             # Comitar alterações
             await self.repository.commit()
@@ -310,7 +355,17 @@ class FornecedorService:
                 id_empresa=id_empresa,
                 detalhes=f"Fornecedor {fornecedor.nome} removido"
             )
-            await self.log_service.registrar_log(log)
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="EXCLUIR_FORNECEDOR",
+                detalhes={
+                    "id_fornecedor": str(id_fornecedor),
+                    "nome": fornecedor.nome,
+                    "tipo": fornecedor.tipo,
+                    "documento": fornecedor.documento
+                },
+                empresa_id=id_empresa
+            )
             
             # Comitar alterações
             await self.repository.commit()
@@ -368,7 +423,17 @@ class FornecedorService:
                 id_empresa=id_empresa,
                 detalhes=f"Fornecedor {fornecedor.nome} desativado"
             )
-            await self.log_service.registrar_log(log)
+            await self.auditoria_service.registrar_acao(
+                usuario_id=id_usuario,
+                acao="DESATIVAR_FORNECEDOR",
+                detalhes={
+                    "id_fornecedor": str(id_fornecedor),
+                    "nome": fornecedor.nome,
+                    "tipo": fornecedor.tipo,
+                    "documento": fornecedor.documento
+                },
+                empresa_id=id_empresa
+            )
             
             # Comitar alterações
             await self.repository.commit()

@@ -8,14 +8,14 @@ from typing import Optional, List, Dict, Any, Union
 from datetime import date
 from decimal import Decimal
 from enum import Enum
-from pydantic import BaseModel, Field, validator, EmailStr, root_validator
-import re
+from pydantic import BaseModel, Field, EmailStr, field_validator, model_validator
 
-from app.utils.validation import (
-    is_valid_cpf, is_valid_cnpj, is_valid_phone, is_valid_email,
-    sanitize_string, detect_attack_patterns
+from app.utils.validation import sanitize_string, detect_attack_patterns
+from app.utils.validators_extra import (
+    validar_cep, validar_uf, validar_telefone, validar_email,
+    validar_tipo_contato, validar_valor_contato
 )
-from app.schemas.validators import validar_cpf_cnpj, formatar_cpf_cnpj
+from app.utils.validators import validar_cpf_cnpj, formatar_cpf_cnpj
 
 
 class SituacaoCliente(str, Enum):
@@ -44,44 +44,34 @@ class Endereco(BaseModel):
     cep: str = Field(..., max_length=9)
     principal: bool = True
     
-    @validator('cep')
+    @field_validator('cep')
+    @classmethod
     def validate_cep(cls, v):
         """Valida o formato do CEP."""
-        # Remover caracteres não numéricos
-        v = re.sub(r'[^\d]', '', v)
-        
-        # Verificar se tem 8 dígitos
-        if len(v) != 8:
-            raise ValueError("CEP deve conter 8 dígitos")
-            
-        # Formatar como padrão: 00000-000
-        return f"{v[:5]}-{v[5:]}"
+        return validar_cep(v)
     
-    @validator('uf')
+    @field_validator('uf')
+    @classmethod
     def validate_uf(cls, v):
-        """Valida a UF."""
-        # Lista de UFs válidas
-        ufs_validas = [
-            "AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", "MT", "MS", 
-            "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", "RO", "RR", "SC", 
-            "SP", "SE", "TO"
-        ]
-        
-        v = v.upper()
-        if v not in ufs_validas:
-            raise ValueError("UF inválida")
-        return v
+        """Valida o formato da UF."""
+        return validar_uf(v)
     
-    @validator('logradouro', 'complemento', 'bairro', 'cidade')
-    def sanitize_text_fields(cls, v, values, field):
-        """Sanitiza campos de texto para remover possíveis códigos maliciosos."""
-        if v:
-            # Verificar padrões de ataque
-            attacks = detect_attack_patterns(v)
-            if attacks:
-                raise ValueError(f"Campo contém padrões de ataque: {', '.join(attacks)}")
-                
-            return sanitize_string(v)
+    @field_validator('logradouro', 'complemento', 'bairro', 'cidade')
+    @classmethod
+    def sanitize_text_fields(cls, v, info):
+        """Sanitiza campos de texto para prevenir ataques."""
+        if v is None:
+            return v
+            
+        # Aplicar sanitização
+        v = sanitize_string(v)
+        
+        # Verificar padrões de ataque
+        attack_patterns = detect_attack_patterns(v)
+        if attack_patterns:
+            field_name = info.field_name
+            raise ValueError(f"Campo {field_name} contém padrão potencialmente malicioso: {', '.join(attack_patterns)}")
+            
         return v
 
 
@@ -92,33 +82,19 @@ class Contato(BaseModel):
     principal: bool = False
     observacao: Optional[str] = Field(None, max_length=200)
     
-    @validator('tipo')
+    @field_validator('tipo')
+    @classmethod
     def validate_tipo(cls, v):
         """Valida o tipo de contato."""
-        tipos_validos = ["celular", "telefone", "email", "whatsapp", "instagram", "facebook", "outro"]
-        v = v.lower()
-        if v not in tipos_validos:
-            raise ValueError(f"Tipo de contato inválido. Tipos válidos: {', '.join(tipos_validos)}")
-        return v
+        return validar_tipo_contato(v)
     
-    @validator('valor')
-    def validate_valor(cls, v, values):
-        """Valida o valor do contato com base no tipo."""
-        if 'tipo' not in values:
-            return v
-            
-        tipo = values['tipo']
-        
-        if tipo in ["celular", "telefone", "whatsapp"]:
-            if not is_valid_phone(v):
-                raise ValueError("Número de telefone inválido")
-                
-        elif tipo == "email":
-            if not is_valid_email(v):
-                raise ValueError("Endereço de e-mail inválido")
-                
-        # Sanitizar o valor para remover possíveis códigos maliciosos
-        return sanitize_string(v)
+    @field_validator('valor')
+    @classmethod
+    def validate_valor(cls, v, info):
+        """Valida o valor do contato de acordo com seu tipo."""
+        values = info.data
+        tipo = values.get('tipo', '')
+        return validar_valor_contato(v, tipo)
 
 
 class ClienteCreate(BaseModel):
@@ -135,53 +111,67 @@ class ClienteCreate(BaseModel):
     enderecos: List[Endereco] = Field(..., min_items=1)
     contatos: List[Contato] = Field(..., min_items=1)
     
-    @validator('nome', 'nome_fantasia')
+    @field_validator('nome', 'nome_fantasia')
+    @classmethod
     def sanitize_names(cls, v):
-        """Sanitiza campos de nome para remover caracteres inválidos."""
-        if v:
-            return sanitize_string(v)
-        return v
+        """Sanitiza os campos de nome para evitar injeções."""
+        if v is None:
+            return v
+        return sanitize_string(v)
     
-    @validator('documento')
-    def validate_documento(cls, v, values):
-        """Valida CPF ou CNPJ com base no tipo de cliente."""
-        if 'tipo' not in values:
+    @field_validator('documento')
+    @classmethod
+    def validate_documento(cls, v, info):
+        """Valida e formata o documento conforme tipo de cliente."""
+        if not v:
             return v
             
-        try:
-            # Usar o validador existente para CPF/CNPJ
-            documento_limpo = validar_cpf_cnpj(v)
+        # Verificar formato do documento
+        if not validar_cpf_cnpj(v):
+            raise ValueError("Documento inválido")
             
-            # Verificar se o tipo de documento corresponde ao tipo de cliente
-            if values['tipo'] == TipoCliente.PESSOA_FISICA and len(documento_limpo) != 11:
-                raise ValueError("Para Pessoa Física, o documento deve ser um CPF válido")
-                
-            if values['tipo'] == TipoCliente.PESSOA_JURIDICA and len(documento_limpo) != 14:
-                raise ValueError("Para Pessoa Jurídica, o documento deve ser um CNPJ válido")
-                
-            # Formatar o documento para exibição
-            return formatar_cpf_cnpj(v)
+        # Formatar documento
+        v = formatar_cpf_cnpj(v)
+        
+        # Validar consistência com tipo de cliente
+        values = info.data
+        tipo = values.get('tipo')
+        
+        if tipo == TipoCliente.PESSOA_FISICA and len(v.replace(".", "").replace("-", "")) != 11:
+            raise ValueError("CPF inválido para pessoa física")
             
-        except ValueError as e:
-            raise ValueError(str(e))
+        if tipo == TipoCliente.PESSOA_JURIDICA and len(v.replace(".", "").replace("-", "").replace("/", "")) != 14:
+            raise ValueError("CNPJ inválido para pessoa jurídica")
+            
+        return v
     
-    @root_validator
-    def validate_contato_principal(cls, values):
+    @model_validator(mode='after')
+    def validate_contato_principal(self):
         """Verifica se existe pelo menos um contato principal."""
-        contatos = values.get('contatos', [])
-        if contatos and not any(c.principal for c in contatos):
-            # Definir o primeiro contato como principal se nenhum for marcado
-            contatos[0].principal = True
-        return values
+        if not self.contatos:
+            return self
+            
+        # Verificar se há pelo menos um contato principal
+        has_principal = any(contato.principal for contato in self.contatos)
+        if not has_principal:
+            # Se não houver, definir o primeiro como principal
+            self.contatos[0].principal = True
+            
+        return self
     
-    @root_validator
-    def validate_endereco_principal(cls, values):
+    @model_validator(mode='after')
+    def validate_endereco_principal(self):
         """Verifica se existe pelo menos um endereço principal."""
-        enderecos = values.get('enderecos', [])
-        if enderecos and not any(e.principal for e in enderecos):
-            # Definir o primeiro endereço como principal se nenhum for marcado
-            enderecos[0].principal = True
-        return values
+        if not self.enderecos:
+            return self
+            
+        # Verificar se há pelo menos um endereço principal
+        has_principal = any(endereco.principal for endereco in self.enderecos)
+        if not has_principal:
+            # Se não houver, definir o primeiro como principal
+            self.enderecos[0].principal = True
+            
+        return self
 
 
 class ClienteUpdate(BaseModel):
@@ -194,12 +184,13 @@ class ClienteUpdate(BaseModel):
     situacao: Optional[SituacaoCliente] = None
     observacoes: Optional[str] = Field(None, max_length=500)
     
-    @validator('nome', 'nome_fantasia')
-    def sanitize_names(cls, v):
-        """Sanitiza campos de nome para remover caracteres inválidos."""
-        if v:
-            return sanitize_string(v)
-        return v
+    @field_validator('nome', 'nome_fantasia', 'observacoes')
+    @classmethod
+    def sanitize_text(cls, v):
+        """Sanitiza os campos de texto."""
+        if v is None:
+            return v
+        return sanitize_string(v)
 
 
 class ClienteResponse(BaseModel):
@@ -219,6 +210,6 @@ class ClienteResponse(BaseModel):
     created_at: date
     updated_at: Optional[date] = None
     
-    class Config:
-        """Configuração do modelo."""
-        orm_mode = True 
+    model_config = {
+        "from_attributes": True
+    } 

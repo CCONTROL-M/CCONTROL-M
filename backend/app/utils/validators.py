@@ -256,4 +256,26 @@ def validar_email_fornecedor(email: str) -> bool:
         validate_email(email, check_deliverability=False)
         return True
     except EmailNotValidError:
-        return False 
+        return False
+
+
+def formatar_cpf_cnpj(documento: str) -> str:
+    """
+    Formata um CPF ou CNPJ para o padrão adequado.
+    
+    Args:
+        documento: String contendo o CPF ou CNPJ a ser formatado
+        
+    Returns:
+        str: Documento formatado
+    """
+    # Remover caracteres não numéricos
+    documento = re.sub(r'[^0-9]', '', documento)
+    
+    # Verificar se é CPF ou CNPJ pelo tamanho
+    if len(documento) == 11:
+        return formatar_cpf(documento)
+    elif len(documento) == 14:
+        return formatar_cnpj(documento)
+    
+    return documento 

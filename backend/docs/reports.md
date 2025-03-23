@@ -77,6 +77,33 @@ backend/
    - Produtos
    - Criado em
 
+4. **Contas a Pagar** (`ReportType.CONTAS_PAGAR`) 
+   - Código
+   - Descrição
+   - Valor
+   - Data Vencimento
+   - Status
+   - Fornecedor
+   - Data Pagamento
+   - Categoria
+
+5. **Contas a Receber** (`ReportType.CONTAS_RECEBER`)
+   - Código
+   - Descrição
+   - Valor
+   - Data Vencimento
+   - Status
+   - Cliente
+   - Data Recebimento
+   - Categoria
+
+6. **Fluxo de Caixa** (`ReportType.FLUXO_CAIXA`)
+   - Período
+   - Total Entradas
+   - Total Saídas
+   - Saldo Final
+   - Detalhamento por dia/mês
+
 ## Uso da API
 
 ### Endpoint
@@ -87,7 +114,7 @@ POST /api/reports/export/{report_type}
 
 ### Parâmetros
 
-- `report_type`: Tipo do relatório (`produtos`, `centros_custo`, `categorias`)
+- `report_type`: Tipo do relatório (`produtos`, `centros_custo`, `categorias`, `contas_pagar`, `contas_receber`, `fluxo_caixa`)
 - `format`: Formato de saída (`pdf`, `excel`)
 - `filters`: Filtros opcionais
 
@@ -116,11 +143,45 @@ arquivo = response.json()  # Caminho do arquivo gerado
 
 ## Filtros Disponíveis
 
+### Filtros Gerais (para todos os relatórios)
 - `search`: Termo de busca geral
-- `categoria_id`: ID da categoria (apenas para produtos)
 - `data_inicio`: Data inicial do período
 - `data_fim`: Data final do período
 - `status`: Status (ativo/inativo)
+
+### Filtros Específicos
+
+#### Produtos
+- `categoria_id`: ID da categoria
+- `preco_min`: Preço mínimo
+- `preco_max`: Preço máximo
+- `estoque_min`: Estoque mínimo
+
+#### Contas a Pagar
+- `fornecedor_id`: ID do fornecedor
+- `categoria_id`: ID da categoria
+- `status`: Status da conta (PENDENTE, PAGO, VENCIDO, CANCELADO)
+- `apenas_vencidas`: Somente contas vencidas (boolean)
+
+#### Contas a Receber
+- `cliente_id`: ID do cliente
+- `categoria_id`: ID da categoria
+- `status`: Status da conta (pendente, recebido, parcial, cancelado, atrasado)
+- `apenas_atrasadas`: Somente contas atrasadas (boolean)
+
+#### Fluxo de Caixa
+- `conta_bancaria_id`: ID da conta bancária
+- `agrupamento`: Tipo de agrupamento (diario, semanal, mensal)
+- `categoria_id`: Filtrar por categoria
+
+## Middlewares e Segurança
+
+Os relatórios utilizam todos os middlewares de segurança ativados no sistema:
+
+- **Audit Middleware**: Registra cada geração de relatório
+- **Rate Limiter**: Limita o número de relatórios gerados por usuário
+- **Security Middleware**: Validação de tokens e permissões
+- **Validation Middleware**: Validação de parâmetros
 
 ## Personalização
 

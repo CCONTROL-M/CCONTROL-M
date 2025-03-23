@@ -18,6 +18,7 @@ from app.models.centro_custo import CentroCusto
 from app.models.conta_bancaria import ContaBancaria
 from app.models.forma_pagamento import FormaPagamento
 from app.models.enums import TipoLancamento, StatusLancamento, StatusVenda, StatusParcela
+from app.models.auditoria import Auditoria
 
 # Adicionar os novos modelos aqui conforme necessário 
 
@@ -46,5 +47,6 @@ __all__ = [
     "TipoLancamento",
     "StatusLancamento",
     "StatusVenda",
-    "StatusParcela"
+    "StatusParcela",
+    "Auditoria"
 ] 

@@ -30,12 +30,23 @@ class Settings(BaseSettings):
         "DATABASE_URL", 
         "postgresql+asyncpg://postgres:postgres@localhost/ccontrolm"
     )
+    DATABASE_URL_TEST: str = os.getenv(
+        "DATABASE_URL_TEST",
+        "postgresql+asyncpg://postgres:postgres@localhost/ccontrolm_test"
+    )
 
     # Segurança (JWT)
     SECRET_KEY: str = os.getenv("SECRET_KEY", "super-secret-key-for-development-only")
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440  # 24 horas
     SECURE_COOKIES: bool = False
+    
+    # OAuth e Swagger UI
+    CLIENT_ID: str = os.getenv("CLIENT_ID", "ccontrolm-webapp")
+    CLIENT_SECRET: str = os.getenv("CLIENT_SECRET", "ccontrolm-secret")
+    SWAGGER_UI_OAUTH2_REDIRECT_URL: str = "/api/v1/oauth2-redirect"
+    SWAGGER_UI_CLIENT_ID: str = CLIENT_ID
+    SWAGGER_UI_CLIENT_SECRET: str = CLIENT_SECRET
 
     # Monitoramento
     ENABLE_MONITORING: bool = os.getenv("ENABLE_MONITORING", "true").lower() == "true"

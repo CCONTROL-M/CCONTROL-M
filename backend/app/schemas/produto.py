@@ -78,9 +78,29 @@ class ProdutoList(BaseModel):
 # Esquema para atualização de estoque
 class EstoqueUpdate(BaseModel):
     quantidade: Decimal = Field(..., description="Quantidade a adicionar (positivo) ou remover (negativo)")
+    tipo: Optional[str] = Field("entrada", description="Tipo de movimentação: 'entrada' ou 'saida'")
+    observacao: Optional[str] = None
 
     @validator('quantidade')
     def quantidade_nao_pode_ser_zero(cls, v):
         if v == 0:
             raise ValueError('Quantidade não pode ser zero')
-        return v 
+        return v
+
+# Esquema para movimentação de estoque
+class MovimentacaoEstoque(BaseModel):
+    id_produto: UUID
+    id_empresa: UUID
+    quantidade: Decimal
+    tipo: str = Field(..., description="Tipo de movimentação: 'entrada', 'saida' ou 'ajuste'")
+    observacao: Optional[str] = None
+    
+    @validator('tipo')
+    def validar_tipo(cls, v):
+        tipos_validos = ["entrada", "saida", "ajuste"]
+        if v.lower() not in tipos_validos:
+            raise ValueError(f"Tipo de movimentação deve ser um dos seguintes: {', '.join(tipos_validos)}")
+        return v.lower()
+    
+    class Config:
+        from_attributes = True 

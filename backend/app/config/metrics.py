@@ -10,6 +10,7 @@ import time
 import threading
 import os
 from collections import defaultdict
+from prometheus_client import Counter, Histogram, Gauge, Summary, generate_latest, CONTENT_TYPE_LATEST
 
 # Constantes e configurações
 METRICS_RETENTION_DAYS = int(os.getenv("METRICS_RETENTION_DAYS", "7"))
@@ -383,7 +384,10 @@ def update_response_size(route: str, method: str, size: int) -> None:
 
 def reset_metrics() -> None:
     """
-    Reinicia todas as métricas, preservando o histórico.
+    Reinicia os contadores de métricas mantendo o histórico.
+    
+    Esta função é útil para limpar contadores após resolução 
+    de problemas ou para iniciar uma nova sessão de monitoramento.
     """
     metrics.reset()
 
@@ -395,14 +399,14 @@ def get_metrics_prometheus() -> str:
     Returns:
         String com as métricas no formato Prometheus
     """
-    return metrics.to_prometheus()
+    return generate_latest()
 
 
 def get_metrics_dict() -> Dict[str, Any]:
     """
-    Obtém as métricas como um dicionário estruturado.
+    Obtém as métricas em formato dict para exibição em API.
     
     Returns:
-        Dicionário com métricas organizadas
+        Dicionário com métricas para uso em dashboards
     """
     return metrics.to_dict() 

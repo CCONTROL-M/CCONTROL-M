@@ -6,7 +6,6 @@ from datetime import datetime, date
 from sqlalchemy import select, func, and_, desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from fastapi import HTTPException, status
 
 from app.models.lancamento import Lancamento
 from app.models.cliente import Cliente
@@ -185,10 +184,7 @@ class LancamentoRepository:
             return lancamento
         except Exception as e:
             await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao criar lançamento: {str(e)}"
-            )
+            raise
 
     async def update(self, id_lancamento: UUID, id_empresa: UUID, lancamento_data: Dict[str, Any]) -> Optional[Lancamento]:
         """
@@ -229,10 +225,7 @@ class LancamentoRepository:
             return lancamento
         except Exception as e:
             await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao atualizar lançamento: {str(e)}"
-            )
+            raise
 
     async def delete(self, id_lancamento: UUID, id_empresa: UUID) -> bool:
         """
@@ -266,108 +259,56 @@ class LancamentoRepository:
             return True
         except Exception as e:
             await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao excluir lançamento: {str(e)}"
-            )
-            
+            raise
+
     async def efetivar_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> Optional[Lancamento]:
         """
-        Efetivar um lançamento (alterar status de pendente para efetivado).
+        Marcar lançamento como efetivado.
         
         Args:
             id_lancamento: ID do lançamento
             id_empresa: ID da empresa para verificação
             
         Returns:
-            Lançamento efetivado ou None se não encontrado
+            Lançamento atualizado ou None se não encontrado
         """
-        try:
-            # Verificar se o lançamento existe
-            query = (
-                select(Lancamento)
-                .where(Lancamento.id_lancamento == id_lancamento)
-                .where(Lancamento.id_empresa == id_empresa)
-            )
+        # Buscar o lançamento
+        lancamento = await self.get_by_id(id_lancamento, id_empresa)
+        if not lancamento:
+            return None
             
-            result = await self.session.execute(query)
-            lancamento = result.scalar_one_or_none()
-            
-            if not lancamento:
-                return None
-            
-            # Verificar se o lançamento já está efetivado ou cancelado
-            if lancamento.status == "efetivado":
-                return lancamento
-                
-            if lancamento.status == "cancelado":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Não é possível efetivar um lançamento cancelado"
-                )
-            
-            # Atualizar status para efetivado
-            lancamento.status = "efetivado"
-            lancamento.data_efetivacao = datetime.now()
-            
-            # Salvar alterações
-            self.session.add(lancamento)
-            await self.session.commit()
-            await self.session.refresh(lancamento)
-            
-            return lancamento
-        except HTTPException:
-            await self.session.rollback()
-            raise
-        except Exception as e:
-            await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao efetivar lançamento: {str(e)}"
-            )
-            
+        # Atualizar o status
+        lancamento.status = "EFETIVADO"
+        lancamento.data_efetivacao = datetime.now()
+        
+        # Salvar as alterações
+        await self.session.commit()
+        await self.session.refresh(lancamento)
+        
+        return lancamento
+    
     async def cancelar_lancamento(self, id_lancamento: UUID, id_empresa: UUID) -> Optional[Lancamento]:
         """
-        Cancelar um lançamento.
+        Marcar lançamento como cancelado.
         
         Args:
             id_lancamento: ID do lançamento
             id_empresa: ID da empresa para verificação
             
         Returns:
-            Lançamento cancelado ou None se não encontrado
+            Lançamento atualizado ou None se não encontrado
         """
-        try:
-            # Verificar se o lançamento existe
-            query = (
-                select(Lancamento)
-                .where(Lancamento.id_lancamento == id_lancamento)
-                .where(Lancamento.id_empresa == id_empresa)
-            )
+        # Buscar o lançamento
+        lancamento = await self.get_by_id(id_lancamento, id_empresa)
+        if not lancamento:
+            return None
             
-            result = await self.session.execute(query)
-            lancamento = result.scalar_one_or_none()
-            
-            if not lancamento:
-                return None
-            
-            # Verificar se o lançamento já está cancelado
-            if lancamento.status == "cancelado":
-                return lancamento
-            
-            # Atualizar status para cancelado
-            lancamento.status = "cancelado"
-            lancamento.data_cancelamento = datetime.now()
-            
-            # Salvar alterações
-            self.session.add(lancamento)
-            await self.session.commit()
-            await self.session.refresh(lancamento)
-            
-            return lancamento
-        except Exception as e:
-            await self.session.rollback()
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"Erro ao cancelar lançamento: {str(e)}"
-            ) 
+        # Atualizar o status
+        lancamento.status = "CANCELADO"
+        lancamento.data_cancelamento = datetime.now()
+        
+        # Salvar as alterações
+        await self.session.commit()
+        await self.session.refresh(lancamento)
+        
+        return lancamento 
