@@ -20,6 +20,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import useConfirmDialog from '../hooks/useConfirmDialog';
 import Modal from '../components/Modal';
 import FornecedorForm from '../components/fornecedor/FornecedorForm';
+import CadastroFiltro from '../components/CadastroFiltro';
 
 /**
  * Página de gerenciamento de fornecedores
@@ -30,14 +31,24 @@ import FornecedorForm from '../components/fornecedor/FornecedorForm';
  * - Edição de fornecedores existentes
  * - Exclusão de fornecedores
  * - Alternância entre dados mock e reais
+ * - Filtro por nome/código
+ * - Paginação para listas extensas
  */
 export default function Fornecedores() {
   // Estados
   const [fornecedores, setFornecedores] = useState<Fornecedor[]>([]);
+  const [fornecedoresFiltrados, setFornecedoresFiltrados] = useState<Fornecedor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalAberto, setModalAberto] = useState(false);
   const [fornecedorEmEdicao, setFornecedorEmEdicao] = useState<Fornecedor | undefined>(undefined);
+  const [termoBusca, setTermoBusca] = useState<string>("");
+  
+  // Estados para paginação
+  const [paginaAtual, setPaginaAtual] = useState<number>(1);
+  const itensPorPagina = 10;
+  const [totalPaginas, setTotalPaginas] = useState<number>(1);
+  const [fornecedoresPaginados, setFornecedoresPaginados] = useState<Fornecedor[]>([]);
   
   // Hooks
   const { showSuccessToast, showErrorToast } = useToastUtils();
@@ -96,6 +107,16 @@ export default function Fornecedores() {
     fetchData();
     adicionarIndicadorMock();
   }, []);
+  
+  // Efeito para filtrar os fornecedores quando o termo de busca mudar
+  useEffect(() => {
+    filtrarFornecedores();
+  }, [termoBusca, fornecedores]);
+  
+  // Efeito para paginar os fornecedores filtrados
+  useEffect(() => {
+    paginarFornecedores();
+  }, [fornecedoresFiltrados, paginaAtual]);
 
   // Buscar dados dos fornecedores
   const fetchData = async () => {
@@ -113,6 +134,53 @@ export default function Fornecedores() {
     } finally {
       setLoading(false);
     }
+  };
+  
+  // Filtrar fornecedores com base no termo de busca
+  const filtrarFornecedores = () => {
+    if (!termoBusca) {
+      setFornecedoresFiltrados(fornecedores);
+    } else {
+      const termo = termoBusca.toLowerCase();
+      const filtrados = fornecedores.filter(fornecedor => 
+        fornecedor.nome.toLowerCase().includes(termo) || 
+        fornecedor.cnpj.toLowerCase().includes(termo) ||
+        fornecedor.id_fornecedor.toLowerCase().includes(termo)
+      );
+      setFornecedoresFiltrados(filtrados);
+    }
+    
+    // Resetar para a primeira página quando filtrar
+    setPaginaAtual(1);
+  };
+  
+  // Buscar fornecedores com base no termo de busca
+  const buscarFornecedores = (termo: string) => {
+    setTermoBusca(termo);
+  };
+  
+  // Limpar filtros
+  const limparFiltros = () => {
+    setTermoBusca("");
+    setPaginaAtual(1);
+  };
+  
+  // Paginar fornecedores filtrados
+  const paginarFornecedores = () => {
+    // Calcular total de páginas
+    const total = Math.ceil(fornecedoresFiltrados.length / itensPorPagina);
+    setTotalPaginas(total);
+    
+    // Obter itens da página atual
+    const inicio = (paginaAtual - 1) * itensPorPagina;
+    const fim = inicio + itensPorPagina;
+    const itensPaginados = fornecedoresFiltrados.slice(inicio, fim);
+    setFornecedoresPaginados(itensPaginados);
+  };
+  
+  // Função para mudar de página
+  const mudarPagina = (pagina: number) => {
+    setPaginaAtual(pagina);
   };
   
   // Função para abrir o modal de novo fornecedor
@@ -240,18 +308,35 @@ export default function Fornecedores() {
         </div>
       </div>
       
+      {/* Adicionar filtro de busca */}
+      <CadastroFiltro
+        onBuscar={buscarFornecedores}
+        onLimpar={limparFiltros}
+        totalPaginas={totalPaginas}
+        paginaAtual={paginaAtual}
+        onMudarPagina={mudarPagina}
+        placeholder="Buscar por nome, CNPJ ou código..."
+        isLoading={loading}
+      />
+      
       <DataStateHandler
         loading={loading}
         error={error}
-        dataLength={fornecedores.length}
+        dataLength={fornecedoresFiltrados.length}
         onRetry={fetchData}
         emptyMessage="Nenhum fornecedor encontrado."
       >
         <Table
           columns={colunas}
-          data={fornecedores}
+          data={fornecedoresPaginados}
           emptyMessage="Nenhum fornecedor encontrado."
         />
+        
+        {fornecedoresFiltrados.length > 0 && fornecedoresPaginados.length === 0 && (
+          <p className="text-gray-600 text-center mt-4">
+            Não há fornecedores nesta página. Tente uma página diferente.
+          </p>
+        )}
       </DataStateHandler>
       
       {/* Modal de cadastro/edição de fornecedor */}

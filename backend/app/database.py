@@ -23,40 +23,73 @@ logger = logging.getLogger(__name__)
 # Criar classe base para modelos
 Base = declarative_base()
 
-# Criar engine síncrona para compatibilidade
-engine = create_engine(
-    settings.DATABASE_URL,
-    pool_pre_ping=True,
-    echo=settings.DEBUG
-)
-
-# Criar engine assíncrona
-# Verificar o tipo de banco de dados para usar o driver correto
+# Ajustar URLs para os drivers corretos
 if settings.DATABASE_URL.startswith(('postgresql', 'postgres')):
-    async_db_url = settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+    # Se o URL já contiver o driver, substitua-o conforme necessário
+    if 'postgresql+asyncpg://' in settings.DATABASE_URL:
+        sync_db_url = settings.DATABASE_URL.replace('postgresql+asyncpg://', 'postgresql://')
+        async_db_url = settings.DATABASE_URL  # Mantém o driver asyncpg para conexões assíncronas
+    elif 'postgresql://' in settings.DATABASE_URL:
+        sync_db_url = settings.DATABASE_URL  # Mantém sem driver específico para conexões síncronas
+        async_db_url = settings.DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://')
+    else:
+        # Caso padrão
+        sync_db_url = settings.DATABASE_URL
+        async_db_url = settings.DATABASE_URL.replace('postgresql://', 'postgresql+asyncpg://')
 elif settings.DATABASE_URL.startswith('sqlite'):
     # Para SQLite, usamos aiosqlite como driver assíncrono
-    async_db_url = settings.DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///")
+    if 'sqlite+aiosqlite://' in settings.DATABASE_URL:
+        async_db_url = settings.DATABASE_URL
+        sync_db_url = settings.DATABASE_URL.replace('sqlite+aiosqlite://', 'sqlite:///')
+    else:
+        async_db_url = settings.DATABASE_URL.replace('sqlite:///', 'sqlite+aiosqlite:///')
+        sync_db_url = settings.DATABASE_URL
 else:
     # Default para outros bancos de dados
+    sync_db_url = settings.DATABASE_URL
     async_db_url = settings.DATABASE_URL
 
-async_engine = create_async_engine(
-    async_db_url,
+# Engine síncrona
+engine = create_engine(
+    sync_db_url,
     pool_pre_ping=True,
     echo=settings.DEBUG
 )
+
+# Somente criar engine assíncrona se não estivermos usando SQLite para testes
+# ou se o driver assíncrono estiver disponível
+try:
+    if 'sqlite' in async_db_url and 'mode=memory' in async_db_url:
+        # Não criar engine assíncrona para SQLite em memória
+        async_engine = None
+    else:
+        # Tentar criar engine assíncrona
+        async_engine = create_async_engine(
+            async_db_url,
+            pool_pre_ping=True,
+            echo=settings.DEBUG
+        )
+except ImportError:
+    logger.warning("Driver assíncrono não disponível, usando apenas engine síncrona.")
+    async_engine = None
 
 # Configuração da sessão local síncrona
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Configuração da sessão local assíncrona
-AsyncSessionLocal = async_sessionmaker(
-    autocommit=False, 
-    autoflush=False, 
-    bind=async_engine,
-    expire_on_commit=False
-)
+if async_engine is not None:
+    AsyncSessionLocal = async_sessionmaker(
+        autocommit=False, 
+        autoflush=False, 
+        bind=async_engine,
+        expire_on_commit=False
+    )
+else:
+    # Definir um stub que levantará um erro se for usado
+    def _async_session_not_available(*args, **kwargs):
+        raise RuntimeError("Engine assíncrona não está disponível. Use a versão síncrona.")
+    
+    AsyncSessionLocal = _async_session_not_available
 
 def get_db() -> Generator[Session, None, None]:
     """
@@ -92,7 +125,13 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
             result = await session.execute(select(models.Item))
             return result.scalars().all()
         ```
+    
+    Raises:
+        RuntimeError: Se a engine assíncrona não estiver disponível.
     """
+    if async_engine is None:
+        raise RuntimeError("Engine assíncrona não está disponível. Use a versão síncrona.")
+        
     async with AsyncSessionLocal() as session:
         try:
             yield session
@@ -139,7 +178,13 @@ async def db_async_session() -> AsyncGenerator[AsyncSession, None]:
             result = await session.execute(select(models.User))
             users = result.scalars().all()
         ```
+    
+    Raises:
+        RuntimeError: Se a engine assíncrona não estiver disponível.
     """
+    if async_engine is None:
+        raise RuntimeError("Engine assíncrona não está disponível. Use a versão síncrona.")
+        
     async with AsyncSessionLocal() as session:
         try:
             yield session

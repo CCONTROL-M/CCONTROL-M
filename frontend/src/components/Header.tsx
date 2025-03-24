@@ -1,7 +1,10 @@
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 
 const Header = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout, login } = useAuth();
   
   // Função para formatar o título da página
   const getPageTitle = () => {
@@ -36,9 +39,55 @@ const Header = () => {
     return routes[path] || 'CCONTROL-M';
   };
 
+  // Função para realizar logout
+  const handleLogout = () => {
+    logout();
+    navigate('/login');
+  };
+  
+  // Função para login automático (usuário de desenvolvimento)
+  const handleAutoLogin = () => {
+    const userData = {
+      nome: 'Usuário de Desenvolvimento',
+      email: 'dev@exemplo.com',
+      id_empresa: '1'
+    };
+    
+    login('fake-jwt-token', userData);
+  };
+
   return (
     <header className="header">
       <h1 className="header-title">{getPageTitle()}</h1>
+      
+      <div className="header-actions">
+        {user ? (
+          <div className="user-menu">
+            <div className="user-info">
+              <span className="user-name">{user.nome}</span>
+              <span className="user-email">{user.email}</span>
+            </div>
+            
+            <button 
+              className="btn-logout" 
+              onClick={handleLogout}
+              aria-label="Sair do sistema"
+            >
+              Sair
+            </button>
+          </div>
+        ) : (
+          <div className="user-menu">
+            <button 
+              className="btn-login" 
+              onClick={handleAutoLogin}
+              aria-label="Login automático"
+            >
+              Login de Dev
+            </button>
+          </div>
+        )}
+      </div>
     </header>
   );
 };

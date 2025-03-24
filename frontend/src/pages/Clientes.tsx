@@ -4,13 +4,15 @@ import {
   listarClientes, 
   removerCliente, 
   cadastrarCliente, 
-  atualizarCliente 
+  atualizarCliente,
+  buscarCliente
 } from "../services/clienteService";
 import { 
   listarClientesMock,
   removerClienteMock, 
   cadastrarClienteMock, 
-  atualizarClienteMock 
+  atualizarClienteMock,
+  buscarClienteMock
 } from "../services/clienteServiceMock";
 import { useMock, adicionarIndicadorMock, toggleMock } from '../utils/mock';
 import { useToastUtils } from '../hooks/useToast';
@@ -20,6 +22,7 @@ import ConfirmDialog from '../components/ConfirmDialog';
 import useConfirmDialog from '../hooks/useConfirmDialog';
 import Modal from '../components/Modal';
 import ClienteForm from '../components/cliente/ClienteForm';
+import CadastroFiltro from '../components/CadastroFiltro';
 
 /**
  * Página de gerenciamento de clientes
@@ -30,14 +33,24 @@ import ClienteForm from '../components/cliente/ClienteForm';
  * - Edição de clientes existentes
  * - Exclusão de clientes
  * - Alternância entre dados mock e reais
+ * - Filtro por nome/código
+ * - Paginação
  */
 export default function Clientes() {
   // Estados
   const [clientes, setClientes] = useState<Cliente[]>([]);
+  const [clientesFiltrados, setClientesFiltrados] = useState<Cliente[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [modalAberto, setModalAberto] = useState(false);
   const [clienteEmEdicao, setClienteEmEdicao] = useState<Cliente | undefined>(undefined);
+  const [termoBusca, setTermoBusca] = useState<string>("");
+  
+  // Estados para paginação
+  const [paginaAtual, setPaginaAtual] = useState<number>(1);
+  const itensPorPagina = 10;
+  const [totalPaginas, setTotalPaginas] = useState<number>(1);
+  const [clientesPaginados, setClientesPaginados] = useState<Cliente[]>([]);
   
   // Hooks
   const { showSuccessToast, showErrorToast } = useToastUtils();
@@ -92,6 +105,16 @@ export default function Clientes() {
     fetchData();
     adicionarIndicadorMock();
   }, []);
+  
+  // Efeito para filtrar os clientes quando o termo de busca mudar
+  useEffect(() => {
+    filtrarClientes();
+  }, [termoBusca, clientes]);
+  
+  // Efeito para paginar os clientes filtrados
+  useEffect(() => {
+    paginarClientes();
+  }, [clientesFiltrados, paginaAtual]);
 
   // Buscar dados dos clientes
   const fetchData = async () => {
@@ -109,6 +132,53 @@ export default function Clientes() {
     } finally {
       setLoading(false);
     }
+  };
+  
+  // Filtrar clientes com base no termo de busca
+  const filtrarClientes = () => {
+    if (!termoBusca) {
+      setClientesFiltrados(clientes);
+    } else {
+      const termo = termoBusca.toLowerCase();
+      const filtrados = clientes.filter(cliente => 
+        cliente.nome.toLowerCase().includes(termo) || 
+        cliente.cpf_cnpj.toLowerCase().includes(termo) ||
+        cliente.id_cliente.toLowerCase().includes(termo)
+      );
+      setClientesFiltrados(filtrados);
+    }
+    
+    // Resetar para a primeira página quando filtrar
+    setPaginaAtual(1);
+  };
+  
+  // Buscar clientes com base no termo de busca
+  const buscarClientes = (termo: string) => {
+    setTermoBusca(termo);
+  };
+  
+  // Limpar filtros
+  const limparFiltros = () => {
+    setTermoBusca("");
+    setPaginaAtual(1);
+  };
+  
+  // Paginar clientes filtrados
+  const paginarClientes = () => {
+    // Calcular total de páginas
+    const total = Math.ceil(clientesFiltrados.length / itensPorPagina);
+    setTotalPaginas(total);
+    
+    // Obter itens da página atual
+    const inicio = (paginaAtual - 1) * itensPorPagina;
+    const fim = inicio + itensPorPagina;
+    const itensPaginados = clientesFiltrados.slice(inicio, fim);
+    setClientesPaginados(itensPaginados);
+  };
+  
+  // Função para mudar de página
+  const mudarPagina = (pagina: number) => {
+    setPaginaAtual(pagina);
   };
   
   // Função para abrir o modal de novo cliente
@@ -235,18 +305,35 @@ export default function Clientes() {
         </div>
       </div>
       
+      {/* Adicionar filtro de busca */}
+      <CadastroFiltro
+        onBuscar={buscarClientes}
+        onLimpar={limparFiltros}
+        totalPaginas={totalPaginas}
+        paginaAtual={paginaAtual}
+        onMudarPagina={mudarPagina}
+        placeholder="Buscar por nome, CPF/CNPJ ou código..."
+        isLoading={loading}
+      />
+      
       <DataStateHandler
         loading={loading}
         error={error}
-        dataLength={clientes.length}
+        dataLength={clientesFiltrados.length}
         onRetry={fetchData}
         emptyMessage="Nenhum cliente encontrado."
       >
         <Table
           columns={colunas}
-          data={clientes}
+          data={clientesPaginados}
           emptyMessage="Nenhum cliente encontrado."
         />
+        
+        {clientesFiltrados.length > 0 && clientesPaginados.length === 0 && (
+          <p className="text-gray-600 text-center mt-4">
+            Não há clientes nesta página. Tente uma página diferente.
+          </p>
+        )}
       </DataStateHandler>
       
       {/* Modal de cadastro/edição de cliente */}

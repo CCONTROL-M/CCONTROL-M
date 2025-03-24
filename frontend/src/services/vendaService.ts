@@ -18,7 +18,7 @@ function getEmpresa(): string {
   }
   
   // Verifica se estamos em ambiente de desenvolvimento
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.warn('ID da empresa não disponível no token. Usando ID de teste para ambiente de desenvolvimento.');
     return EMPRESA_TESTE_ID;
   }
@@ -91,9 +91,14 @@ export async function buscarVenda(id: string): Promise<Venda> {
 }
 
 export async function cadastrarVenda(venda: NovaVenda): Promise<Venda> {
+  // Logs para debug
+  if (import.meta.env.DEV) {
+    console.log("Cadastrando venda:", venda);
+  }
+  
   // Usar mock se configurado
   if (useMock()) {
-    console.log("Usando mock para cadastrar venda:", venda);
+    console.log("Usando mock para cadastrar venda");
     // Simular criação com dados mockados
     return {
       id_venda: `mock-${Date.now()}`,
@@ -118,7 +123,7 @@ export async function cadastrarVenda(venda: NovaVenda): Promise<Venda> {
   } catch (error) {
     console.error("Erro ao cadastrar venda:", error);
     // Falhar silenciosamente em desenvolvimento com mock
-    if (process.env.NODE_ENV === 'development') {
+    if (import.meta.env.DEV) {
       console.warn("Usando mock após falha na API");
       return {
         id_venda: `mock-${Date.now()}`,

@@ -24,6 +24,7 @@ from app.dependencies import get_current_user
 from app.database import get_async_session
 from app.utils.permissions import verify_permission
 from app.schemas.log_sistema import LogSistemaCreate
+from app.schemas.pagination import PaginatedResponse
 
 # Configuração de logger
 logger = logging.getLogger(__name__)
@@ -35,7 +36,7 @@ router = APIRouter(
 )
 
 
-@router.get("", response_model=ContaBancariaList)
+@router.get("", response_model=PaginatedResponse[ContaBancariaList])
 async def listar_contas_bancarias(
     id_empresa: UUID,
     skip: int = Query(0, ge=0, description="Registros para pular (paginação)"),
@@ -45,7 +46,7 @@ async def listar_contas_bancarias(
     banco: Optional[str] = Query(None, description="Filtrar por banco"),
     ativa: Optional[bool] = Query(None, description="Filtrar por status (ativa/inativa)"),
     current_user: TokenPayload = Depends(get_current_user),
-    session: AsyncSession = Depends(get_async_session),
+    service: ContaBancariaService = Depends(),
 ):
     """
     Lista contas bancárias com paginação e filtros opcionais.
@@ -63,9 +64,6 @@ async def listar_contas_bancarias(
     # Verificar permissão
     verify_permission(current_user, "contas_bancarias:listar", id_empresa)
     
-    # Inicializar serviço e buscar contas bancárias
-    conta_bancaria_service = ContaBancariaService()
-    
     # Construir filtros
     filtros = {}
     if nome:
@@ -77,7 +75,7 @@ async def listar_contas_bancarias(
     if ativa is not None:
         filtros["ativa"] = ativa
     
-    contas, total = await conta_bancaria_service.listar_contas_bancarias(
+    contas, total = await service.listar_contas_bancarias(
         id_empresa=id_empresa,
         skip=skip,
         limit=limit,
@@ -88,7 +86,7 @@ async def listar_contas_bancarias(
     page = (skip // limit) + 1 if limit > 0 else 1
     
     # Retornar resposta paginada
-    return ContaBancariaList(
+    return PaginatedResponse(
         items=contas,
         total=total,
         page=page,
@@ -101,7 +99,7 @@ async def obter_conta_bancaria(
     id_conta: UUID = Path(..., description="ID da conta bancária"),
     id_empresa: UUID = Query(..., description="ID da empresa"),
     current_user: TokenPayload = Depends(get_current_user),
-    session: AsyncSession = Depends(get_async_session),
+    service: ContaBancariaService = Depends(),
 ):
     """
     Busca uma conta bancária específica pelo ID.
@@ -114,9 +112,8 @@ async def obter_conta_bancaria(
     # Verificar permissão
     verify_permission(current_user, "contas_bancarias:visualizar", id_empresa)
     
-    # Inicializar serviço e buscar conta bancária
-    conta_bancaria_service = ContaBancariaService()
-    conta_bancaria = await conta_bancaria_service.get_conta_bancaria(id_conta, id_empresa)
+    # Buscar conta bancária
+    conta_bancaria = await service.get_conta_bancaria(id_conta, id_empresa)
     
     return conta_bancaria
 
@@ -125,7 +122,8 @@ async def obter_conta_bancaria(
 async def criar_conta_bancaria(
     conta_bancaria: ContaBancariaCreate,
     current_user: TokenPayload = Depends(get_current_user),
-    session: AsyncSession = Depends(get_async_session),
+    service: ContaBancariaService = Depends(),
+    log_service: LogSistemaService = Depends(),
 ):
     """
     Cria uma nova conta bancária.
@@ -137,12 +135,8 @@ async def criar_conta_bancaria(
     # Verificar permissão
     verify_permission(current_user, "contas_bancarias:criar", conta_bancaria.id_empresa)
     
-    # Inicializar serviços
-    conta_bancaria_service = ContaBancariaService()
-    log_service = LogSistemaService()
-    
     # Criar conta bancária
-    nova_conta = await conta_bancaria_service.criar_conta_bancaria(conta_bancaria)
+    nova_conta = await service.criar_conta_bancaria(conta_bancaria, current_user.sub)
     
     # Registrar log
     await log_service.registrar_log(
@@ -163,7 +157,8 @@ async def atualizar_conta_bancaria(
     conta_bancaria: ContaBancariaUpdate,
     id_empresa: UUID = Query(..., description="ID da empresa"),
     current_user: TokenPayload = Depends(get_current_user),
-    session: AsyncSession = Depends(get_async_session),
+    service: ContaBancariaService = Depends(),
+    log_service: LogSistemaService = Depends(),
 ):
     """
     Atualiza dados de uma conta bancária existente.
@@ -177,18 +172,15 @@ async def atualizar_conta_bancaria(
     # Verificar permissão
     verify_permission(current_user, "contas_bancarias:editar", id_empresa)
     
-    # Inicializar serviços
-    conta_bancaria_service = ContaBancariaService()
-    log_service = LogSistemaService()
-    
     # Buscar conta atual para o log
-    conta_atual = await conta_bancaria_service.get_conta_bancaria(id_conta, id_empresa)
+    conta_atual = await service.get_conta_bancaria(id_conta, id_empresa)
     
     # Atualizar conta bancária
-    conta_atualizada = await conta_bancaria_service.atualizar_conta_bancaria(
+    conta_atualizada = await service.atualizar_conta_bancaria(
         id_conta, 
         conta_bancaria, 
-        id_empresa
+        id_empresa,
+        current_user.sub
     )
     
     # Registrar log
@@ -209,7 +201,8 @@ async def remover_conta_bancaria(
     id_conta: UUID,
     id_empresa: UUID = Query(..., description="ID da empresa"),
     current_user: TokenPayload = Depends(get_current_user),
-    session: AsyncSession = Depends(get_async_session),
+    service: ContaBancariaService = Depends(),
+    log_service: LogSistemaService = Depends(),
 ):
     """
     Remove uma conta bancária.
@@ -222,15 +215,11 @@ async def remover_conta_bancaria(
     # Verificar permissão
     verify_permission(current_user, "contas_bancarias:excluir", id_empresa)
     
-    # Inicializar serviços
-    conta_bancaria_service = ContaBancariaService()
-    log_service = LogSistemaService()
-    
     # Buscar conta para o log antes de remover
-    conta = await conta_bancaria_service.get_conta_bancaria(id_conta, id_empresa)
+    conta = await service.get_conta_bancaria(id_conta, id_empresa)
     
     # Remover conta bancária
-    resultado = await conta_bancaria_service.remover_conta_bancaria(id_conta, id_empresa)
+    resultado = await service.remover_conta_bancaria(id_conta, id_empresa)
     
     # Registrar log
     await log_service.registrar_log(

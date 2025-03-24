@@ -45,23 +45,38 @@ class RelatorioContasReceber(BaseModel):
 
 
 class ResumoPagamentos(BaseModel):
-    """Schema para resumo de pagamentos em um período."""
-    periodo: str = Field(..., description="Tipo de período (diario, mensal, anual)")
-    ano: int = Field(..., description="Ano do período")
-    mes: Optional[int] = Field(None, description="Mês do período (se aplicável)")
-    total_valor: float = Field(..., description="Valor total dos pagamentos")
-    quantidade: int = Field(..., description="Quantidade de pagamentos")
-    dados: List[Dict[str, Any]] = Field(..., description="Dados detalhados dos pagamentos")
+    """
+    Resumo de pagamentos em um período específico.
+    """
+    periodo_inicio: date
+    periodo_fim: date
+    total_pago: float = Field(default=0.0, description="Valor total de pagamentos no período")
+    quantidade: int = Field(default=0, description="Quantidade de pagamentos no período")
+    por_categoria: Dict[str, float] = Field(default_factory=dict, description="Pagamentos agrupados por categoria")
+    por_forma_pagamento: Dict[str, float] = Field(default_factory=dict, description="Pagamentos agrupados por forma de pagamento")
 
 
 class ResumoRecebimentos(BaseModel):
-    """Schema para resumo de recebimentos em um período."""
-    periodo: str = Field(..., description="Tipo de período (diario, mensal, anual)")
-    ano: int = Field(..., description="Ano do período")
-    mes: Optional[int] = Field(None, description="Mês do período (se aplicável)")
-    total_valor: float = Field(..., description="Valor total dos recebimentos")
-    quantidade: int = Field(..., description="Quantidade de recebimentos")
-    dados: List[Dict[str, Any]] = Field(..., description="Dados detalhados dos recebimentos")
+    """
+    Resumo de recebimentos em um período específico.
+    """
+    periodo_inicio: date
+    periodo_fim: date
+    total_recebido: float = Field(default=0.0, description="Valor total de recebimentos no período")
+    quantidade: int = Field(default=0, description="Quantidade de recebimentos no período")
+    por_categoria: Dict[str, float] = Field(default_factory=dict, description="Recebimentos agrupados por categoria")
+    por_forma_pagamento: Dict[str, float] = Field(default_factory=dict, description="Recebimentos agrupados por forma de pagamento")
+
+
+class ResumoDashboard(BaseModel):
+    """
+    Resumo financeiro para o dashboard.
+    """
+    caixa_atual: float = Field(default=0.0, description="Saldo total disponível nas contas bancárias")
+    total_receber: float = Field(default=0.0, description="Total de valores a receber")
+    total_pagar: float = Field(default=0.0, description="Total de valores a pagar")
+    recebimentos_hoje: float = Field(default=0.0, description="Total de recebimentos do dia")
+    pagamentos_hoje: float = Field(default=0.0, description="Total de pagamentos do dia")
 
 
 class FluxoCaixa(BaseModel):

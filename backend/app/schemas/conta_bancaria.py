@@ -10,18 +10,15 @@ class TipoConta(str, Enum):
     """Tipos válidos de contas bancárias."""
     CORRENTE = "corrente"
     POUPANCA = "poupança"
-    CARTEIRA = "carteira"
-    INVESTIMENTO = "investimento"
-    OUTRO = "outro"
 
 
 class ContaBancariaBase(BaseModel):
     """Schema base com campos comuns para Conta Bancária."""
     nome: str = Field(..., description="Nome/identificação da conta bancária", min_length=2, max_length=100)
-    banco: Optional[str] = Field(None, description="Nome do banco", max_length=100)
-    agencia: Optional[str] = Field(None, description="Número da agência", max_length=20)
-    numero: Optional[str] = Field(None, description="Número da conta", max_length=30)
-    tipo: str = Field(..., description="Tipo da conta (corrente, poupança, etc.)")
+    banco: str = Field(..., description="Nome do banco", max_length=100)
+    agencia: str = Field(..., description="Número da agência", max_length=20)
+    conta: str = Field(..., description="Número da conta", max_length=30)
+    tipo: str = Field(..., description="Tipo da conta (corrente ou poupança)")
     saldo_inicial: float = Field(0.0, description="Saldo inicial da conta")
     ativa: bool = Field(True, description="Status de ativação da conta")
     mostrar_dashboard: bool = Field(True, description="Mostrar conta no dashboard")
@@ -53,8 +50,8 @@ class ContaBancariaUpdate(BaseModel):
     nome: Optional[str] = Field(None, description="Nome/identificação da conta bancária", min_length=2, max_length=100)
     banco: Optional[str] = Field(None, description="Nome do banco", max_length=100)
     agencia: Optional[str] = Field(None, description="Número da agência", max_length=20)
-    numero: Optional[str] = Field(None, description="Número da conta", max_length=30)
-    tipo: Optional[str] = Field(None, description="Tipo da conta (corrente, poupança, etc.)")
+    conta: Optional[str] = Field(None, description="Número da conta", max_length=30)
+    tipo: Optional[str] = Field(None, description="Tipo da conta (corrente ou poupança)")
     ativa: Optional[bool] = Field(None, description="Status de ativação da conta")
     mostrar_dashboard: Optional[bool] = Field(None, description="Mostrar conta no dashboard")
     
@@ -91,7 +88,7 @@ class ContaBancariaList(BaseModel):
     """Schema reduzido para listagem de contas bancárias."""
     id_conta: UUID
     nome: str
-    banco: Optional[str] = None
+    banco: str
     tipo: str
     saldo_atual: float
     ativa: bool

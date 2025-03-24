@@ -1,0 +1,3 @@
+@echo off
+echo Executando o comando "Ligar os motores"...
+call ligar_motores.cmd 

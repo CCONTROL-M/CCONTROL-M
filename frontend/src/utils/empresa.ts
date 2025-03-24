@@ -21,7 +21,7 @@ export function getEmpresa(): string {
   }
   
   // Verifica se estamos em ambiente de desenvolvimento
-  if (process.env.NODE_ENV === 'development') {
+  if (import.meta.env.DEV) {
     console.warn('ID da empresa não disponível no token. Usando ID de teste para ambiente de desenvolvimento.');
     return EMPRESA_TESTE_ID;
   }
@@ -56,6 +56,20 @@ export function formatarResposta<T>(response: any): T[] {
 export function adicionarEmpresaFiltro<T extends object>(filtros?: T): T & { id_empresa: string } {
   return {
     ...(filtros || {} as T),
+    id_empresa: getEmpresa()
+  } as T & { id_empresa: string };
+}
+
+/**
+ * Adiciona o ID da empresa atual ao objeto.
+ * 
+ * @param objeto Objeto base
+ * @returns Objeto com ID da empresa adicionado
+ */
+export function adicionarIdEmpresa<T extends {}>(objeto: T): T & { id_empresa: string } {
+  // Adiciona o ID da empresa atual ao objeto
+  return {
+    ...objeto,
     id_empresa: getEmpresa()
   } as T & { id_empresa: string };
 } 

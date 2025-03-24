@@ -1,15 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { Venda, Cliente, NovaVenda } from "../types";
+import { Venda, Cliente, NovaVenda, Parcela } from "../types";
 import { formatarData, formatarMoeda } from "../utils/formatters";
-import { listarVendas } from "../services/vendaService";
-import { listarVendasMock } from "../services/vendaServiceMock";
+import { listarVendas, cadastrarVenda, buscarVenda, listarParcelasPorVenda } from "../services/vendaService";
 import { listarClientes } from "../services/clienteService";
-import { listarClientesMock } from "../services/clienteServiceMock";
 import Modal from "../components/Modal";
-import FormField from "../components/FormField";
-import { useMock } from '../utils/mock';
+import { useMock, setUseMock } from '../utils/mock';
 import Table, { TableColumn } from "../components/Table";
 import DataStateHandler from "../components/DataStateHandler";
+import { useToastUtils } from "../hooks/useToast";
+import VendasParcelasForm from "../components/VendasParcelasForm";
 
 export default function VendasParcelas() {
   // Estados para a listagem de vendas
@@ -17,345 +16,366 @@ export default function VendasParcelas() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   
-  // Estados para o formulário
-  const [formData, setFormData] = useState<NovaVenda>({
-    id_cliente: "",
-    valor_total: 0,
-    numero_parcelas: 1,
-    data_inicio: new Date().toISOString().split('T')[0],
-    descricao: "",
-    categoria: "venda"
-  });
+  // Estados para detalhes de venda e parcelas
+  const [vendaSelecionada, setVendaSelecionada] = useState<Venda | null>(null);
+  const [parcelas, setParcelas] = useState<Parcela[]>([]);
+  const [loadingParcelas, setLoadingParcelas] = useState<boolean>(false);
+  
+  // Estados para modais
+  const [modalNovaVenda, setModalNovaVenda] = useState<boolean>(false);
+  const [modalDetalhes, setModalDetalhes] = useState<boolean>(false);
+  const [modalConfirmacao, setModalConfirmacao] = useState<boolean>(false);
+  const [vendaParaExcluir, setVendaParaExcluir] = useState<string | null>(null);
   
   // Estados auxiliares
   const [clientes, setClientes] = useState<Cliente[]>([]);
-  const [isOpen, setIsOpen] = useState<boolean>(false);
-  const [formErrors, setFormErrors] = useState<{
-    id_cliente?: string;
-    valor_total?: string;
-    numero_parcelas?: string;
-    data_inicio?: string;
-    descricao?: string;
-  }>({});
+  const [enviandoFormulario, setEnviandoFormulario] = useState<boolean>(false);
+  
+  // Toast para notificações
+  const { showSuccessToast, showErrorToast } = useToastUtils();
 
-  // Definição das colunas da tabela
-  const colunas: TableColumn[] = [
+  // Efeito inicial para carregar vendas e clientes
+  useEffect(() => {
+    // Não ativamos mais o modo mock automaticamente
+    // O usuário precisa ativar manualmente se quiser
+    console.log("Iniciando componente VendasParcelas com modo atual");
+    
+    // Carregar as vendas
+    buscarVendas();
+    
+    // Carregar os clientes para o formulário
+    buscarClientes();
+  }, []);
+
+  // Colunas da tabela de vendas
+  const colunasVendas: TableColumn[] = [
     {
-      header: "Descrição",
-      accessor: "descricao"
+      header: "Cliente",
+      accessor: "nome_cliente",
+      render: (venda: Venda) => venda.nome_cliente || venda.cliente?.nome || "Cliente não informado"
     },
     {
-      header: "Valor Total",
+      header: "Valor",
       accessor: "valor_total",
       render: (venda: Venda) => formatarMoeda(venda.valor_total)
+    },
+    {
+      header: "Data",
+      accessor: "data_venda",
+      render: (venda: Venda) => formatarData(venda.data_venda || '')
     },
     {
       header: "Parcelas",
       accessor: "numero_parcelas"
     },
     {
-      header: "Data Início",
-      accessor: "data_inicio",
-      render: (venda: Venda) => formatarData(venda.data_inicio)
+      header: "Status",
+      accessor: "status",
+      render: (venda: Venda) => (
+        <span className={`status-badge ${venda.status === 'paga' ? 'success' : venda.status === 'parcial' ? 'warning' : 'danger'}`}>
+          {venda.status === 'paga' ? 'Paga' : venda.status === 'parcial' ? 'Parcial' : 'Pendente'}
+        </span>
+      )
     },
     {
-      header: "Status",
-      accessor: "status"
+      header: "Ações",
+      accessor: "id_venda",
+      render: (venda: Venda) => (
+        <div className="table-actions">
+          <button 
+            className="btn-icon btn-view" 
+            onClick={() => abrirDetalhesVenda(venda.id_venda)}
+            aria-label="Ver detalhes"
+          >
+            👁️
+          </button>
+          <button 
+            className="btn-icon btn-delete" 
+            onClick={() => confirmarExclusao(venda.id_venda)}
+            aria-label="Excluir venda"
+          >
+            🗑️
+          </button>
+        </div>
+      )
     }
   ];
 
-  // Carregar vendas
-  useEffect(() => {
-    fetchVendas();
-  }, []);
-  
-  // Carregar clientes para o formulário
-  useEffect(() => {
-    if (isOpen) {
-      fetchClientes();
+  // Colunas da tabela de parcelas
+  const colunasParcelas: TableColumn[] = [
+    {
+      header: "Nº",
+      accessor: "numero",
+      render: (parcela: Parcela, index?: number) => parcela.numero || (index !== undefined ? index + 1 : 1)
+    },
+    {
+      header: "Valor",
+      accessor: "valor",
+      render: (parcela: Parcela) => formatarMoeda(parcela.valor)
+    },
+    {
+      header: "Vencimento",
+      accessor: "data_vencimento",
+      render: (parcela: Parcela) => formatarData(parcela.data_vencimento)
+    },
+    {
+      header: "Status",
+      accessor: "status",
+      render: (parcela: Parcela) => (
+        <span className={`status-badge ${parcela.status === 'paga' ? 'success' : parcela.status === 'atrasada' ? 'danger' : 'warning'}`}>
+          {parcela.status === 'paga' ? 'Paga' : parcela.status === 'atrasada' ? 'Atrasada' : 'Pendente'}
+        </span>
+      )
+    },
+    {
+      header: "Data Pagamento",
+      accessor: "data_pagamento",
+      render: (parcela: Parcela) => parcela.data_pagamento ? formatarData(parcela.data_pagamento) : '-'
     }
-  }, [isOpen]);
+  ];
 
-  // Buscar vendas da API ou mock
-  async function fetchVendas() {
+  /**
+   * Busca a lista de vendas da API
+   */
+  async function buscarVendas() {
     setLoading(true);
     setError(null);
     
     try {
-      console.log("Iniciando a busca de vendas...");
-      
-      // Usar dados mock ou reais dependendo do utilitário useMock()
-      const data = useMock() ? await listarVendasMock() : await listarVendas();
-      
-      console.log("Dados recebidos:", data);
-      setVendas(Array.isArray(data) ? data : []);
-    } catch (err: any) {
-      console.error("Erro ao buscar vendas:", err);
-      
-      // Exibir mensagem de erro mais detalhada
-      if (err.response) {
-        // Resposta do servidor com erro
-        const status = err.response.status;
-        const message = err.response.data?.detail || err.response.statusText;
-        setError(`Erro ao carregar as vendas (${status}): ${message}`);
-      } else if (err.request) {
-        // Sem resposta do servidor
-        setError("Erro de comunicação com o servidor. Verifique sua conexão.");
-      } else if (err.message) {
-        // Erro específico
-        setError(`Erro ao carregar as vendas: ${err.message}`);
-      } else {
-        // Erro genérico
-        setError("Erro desconhecido ao carregar as vendas.");
-      }
+      const data = await listarVendas();
+      setVendas(data);
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Erro desconhecido";
+      setError(errorMessage);
+      showErrorToast("Erro ao carregar as vendas");
+      console.error(err);
     } finally {
       setLoading(false);
     }
   }
-  
-  // Buscar clientes da API ou mock
-  async function fetchClientes() {
+
+  /**
+   * Abre o modal com detalhes da venda e suas parcelas
+   */
+  async function abrirDetalhesVenda(id: string) {
+    setLoadingParcelas(true);
+    
     try {
-      const data = useMock() ? await listarClientesMock() : await listarClientes();
-      setClientes(data);
-      // Selecionar o primeiro cliente como padrão se não houver um selecionado
-      if (data.length > 0 && !formData.id_cliente) {
-        setFormData(prev => ({ ...prev, id_cliente: data[0].id_cliente }));
-      }
+      // Buscar detalhes da venda
+      const venda = await buscarVenda(id);
+      setVendaSelecionada(venda);
+      
+      // Buscar parcelas da venda
+      const parcelasVenda = await listarParcelasPorVenda(id);
+      setParcelas(parcelasVenda);
+      
+      // Abrir o modal
+      setModalDetalhes(true);
     } catch (err) {
-      console.error("Erro ao carregar a lista de clientes:", err);
+      console.error(err);
+      showErrorToast("Erro ao carregar os detalhes da venda");
+    } finally {
+      setLoadingParcelas(false);
     }
   }
 
-  // Atualizar os campos do formulário
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
-    const { name, value } = e.target;
-    
-    // Converter para número quando aplicável
-    if (name === "valor_total") {
-      setFormData({ ...formData, [name]: parseFloat(value) || 0 });
-    } else if (name === "numero_parcelas") {
-      setFormData({ ...formData, [name]: parseInt(value) || 1 });
-    } else {
-      setFormData({ ...formData, [name]: value });
+  /**
+   * Busca a lista de clientes para o formulário
+   */
+  async function buscarClientes() {
+    try {
+      const data = await listarClientes();
+      setClientes(data);
+    } catch (err) {
+      console.error(err);
+      showErrorToast("Erro ao carregar a lista de clientes");
     }
+  }
 
-    // Limpar erro do campo quando o usuário digitar
-    if (formErrors[name as keyof typeof formErrors]) {
-      setFormErrors({
-        ...formErrors,
-        [name]: undefined,
-      });
+  /**
+   * Abre o modal para cadastrar nova venda
+   */
+  const abrirModalNovaVenda = () => {
+    setModalNovaVenda(true);
+  };
+
+  /**
+   * Confirma exclusão de venda
+   */
+  const confirmarExclusao = (id: string) => {
+    setVendaParaExcluir(id);
+    setModalConfirmacao(true);
+  };
+
+  /**
+   * Exclui uma venda
+   */
+  const excluirVenda = async () => {
+    if (!vendaParaExcluir) return;
+    
+    try {
+      // Aqui você deve implementar a chamada real para excluir a venda
+      // await excluirVenda(vendaParaExcluir);
+      
+      // Como não temos a função implementada, vamos apenas simular
+      setVendas(prevVendas => prevVendas.filter(venda => venda.id_venda !== vendaParaExcluir));
+      
+      showSuccessToast("Venda excluída com sucesso!");
+    } catch (err) {
+      console.error(err);
+      showErrorToast("Erro ao excluir a venda");
+    } finally {
+      setModalConfirmacao(false);
+      setVendaParaExcluir(null);
     }
   };
 
-  // Validar o formulário
-  const validateForm = (): boolean => {
-    const newErrors: {
-      id_cliente?: string;
-      valor_total?: string;
-      numero_parcelas?: string;
-      data_inicio?: string;
-      descricao?: string;
-    } = {};
+  /**
+   * Processa o formulário de nova venda
+   */
+  const handleCadastrarVenda = async (formData: NovaVenda) => {
+    setEnviandoFormulario(true);
     
-    if (!formData.id_cliente) {
-      newErrors.id_cliente = "Selecione um cliente";
+    try {
+      // Cadastrar a venda
+      const vendaCriada = await cadastrarVenda(formData);
+      
+      // Adicionar a venda à lista
+      setVendas(prev => [...prev, vendaCriada]);
+      
+      // Fechar o modal
+      setModalNovaVenda(false);
+      
+      // Mostrar mensagem de sucesso
+      showSuccessToast("Venda cadastrada com sucesso!");
+    } catch (err) {
+      console.error("Erro ao cadastrar venda:", err);
+      showErrorToast("Erro ao cadastrar venda. Tente novamente.");
+    } finally {
+      setEnviandoFormulario(false);
     }
-    
-    if (formData.valor_total <= 0) {
-      newErrors.valor_total = "O valor total deve ser maior que zero";
-    }
-    
-    if (formData.numero_parcelas < 1) {
-      newErrors.numero_parcelas = "O número de parcelas deve ser pelo menos 1";
-    }
-    
-    if (!formData.data_inicio) {
-      newErrors.data_inicio = "Selecione uma data de início";
-    }
-    
-    if (!formData.descricao.trim()) {
-      newErrors.descricao = "A descrição é obrigatória";
-    }
-    
-    setFormErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  // Enviar formulário
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    if (!validateForm()) {
-      return;
-    }
-    
-    // Por enquanto, apenas imprime no console e fecha o modal
-    console.log("Dados da nova venda:", formData);
-    
-    // Resetar formulário
-    setFormData({
-      id_cliente: "",
-      valor_total: 0,
-      numero_parcelas: 1,
-      data_inicio: new Date().toISOString().split('T')[0],
-      descricao: "",
-      categoria: "venda"
-    });
-    
-    // Fechar modal
-    setIsOpen(false);
-  };
-
-  // Abrir o modal e resetar estado
-  const openModal = () => {
-    setFormData({
-      id_cliente: "",
-      valor_total: 0,
-      numero_parcelas: 1,
-      data_inicio: new Date().toISOString().split('T')[0],
-      descricao: "",
-      categoria: "venda"
-    });
-    setFormErrors({});
-    setIsOpen(true);
   };
 
   return (
-    <div>
+    <div className="vendas-page">
       <div className="page-header">
-        <h1 className="page-title">Vendas & Parcelas</h1>
-        <button 
-          className="btn-primary" 
-          onClick={openModal}
-        >
-          Nova Venda
-        </button>
+        <h1 className="page-title">Vendas e Parcelas</h1>
+        <div className="page-actions">
+          <button
+            className="btn-primary"
+            onClick={abrirModalNovaVenda}
+          >
+            Nova Venda
+          </button>
+        </div>
       </div>
-      
-      <Modal
-        isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
-        title="Cadastrar Nova Venda"
-      >
-        <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label htmlFor="id_cliente">Cliente:</label>
-            <select 
-              id="id_cliente"
-              name="id_cliente"
-              value={formData.id_cliente}
-              onChange={handleInputChange}
-              className={formErrors.id_cliente ? 'input-error' : ''}
-            >
-              <option value="">Selecione um cliente</option>
-              {clientes.map(cliente => (
-                <option key={cliente.id_cliente} value={cliente.id_cliente}>
-                  {cliente.nome}
-                </option>
-              ))}
-            </select>
-            {formErrors.id_cliente && (
-              <div className="form-field-error">{formErrors.id_cliente}</div>
-            )}
-          </div>
-          
-          <FormField
-            label="Valor Total (R$)"
-            name="valor_total"
-            type="number"
-            value={formData.valor_total}
-            onChange={handleInputChange}
-            error={formErrors.valor_total}
-            required
-          />
-          
-          <FormField
-            label="Número de Parcelas"
-            name="numero_parcelas"
-            type="number"
-            value={formData.numero_parcelas}
-            onChange={handleInputChange}
-            error={formErrors.numero_parcelas}
-            required
-          />
-          
-          <FormField
-            label="Data de Início"
-            name="data_inicio"
-            type="date"
-            value={formData.data_inicio}
-            onChange={handleInputChange}
-            error={formErrors.data_inicio}
-            required
-          />
-          
-          <div className="form-group">
-            <label htmlFor="descricao">Descrição:</label>
-            <textarea
-              id="descricao"
-              name="descricao"
-              value={formData.descricao}
-              onChange={handleInputChange}
-              className={formErrors.descricao ? 'input-error' : ''}
-              required
+
+      <div className="card mb-6">
+        <div className="card-body">
+          <h2 className="card-title">Vendas Registradas</h2>
+          <DataStateHandler
+            loading={loading}
+            error={error}
+            dataLength={vendas.length}
+            onRetry={buscarVendas}
+            emptyMessage="Nenhuma venda encontrada."
+          >
+            <Table
+              columns={colunasVendas}
+              data={vendas}
+              emptyMessage="Nenhuma venda encontrada."
             />
-            {formErrors.descricao && (
-              <div className="form-field-error">{formErrors.descricao}</div>
-            )}
+          </DataStateHandler>
+        </div>
+      </div>
+
+      {/* Modal de Detalhes da Venda */}
+      <Modal
+        isOpen={modalDetalhes}
+        onClose={() => setModalDetalhes(false)}
+        title="Detalhes da Venda"
+        size="large"
+      >
+        {vendaSelecionada && (
+          <div className="venda-detalhes">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div>
+                <h3 className="text-lg font-semibold mb-2">Informações da Venda</h3>
+                <p><strong>Cliente:</strong> {vendaSelecionada.nome_cliente || vendaSelecionada.cliente?.nome || "Cliente não informado"}</p>
+                <p><strong>Data:</strong> {formatarData(vendaSelecionada.data_venda || vendaSelecionada.data_inicio || '')}</p>
+                <p><strong>Valor Total:</strong> {formatarMoeda(vendaSelecionada.valor_total)}</p>
+                <p><strong>Parcelas:</strong> {vendaSelecionada.numero_parcelas}</p>
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold mb-2">Status de Pagamento</h3>
+                <p>
+                  <strong>Status Atual:</strong> 
+                  <span className={`status-badge ml-2 ${vendaSelecionada.status === 'paga' ? 'success' : vendaSelecionada.status === 'parcial' ? 'warning' : 'danger'}`}>
+                    {vendaSelecionada.status === 'paga' ? 'Paga' : vendaSelecionada.status === 'parcial' ? 'Parcial' : 'Pendente'}
+                  </span>
+                </p>
+                <p><strong>Valor Pago:</strong> {formatarMoeda(vendaSelecionada.valor_pago || 0)}</p>
+                <p><strong>Valor Pendente:</strong> {formatarMoeda(vendaSelecionada.valor_total - (vendaSelecionada.valor_pago || 0))}</p>
+              </div>
+            </div>
+            
+            <h3 className="text-lg font-semibold mb-3">Parcelas</h3>
+            <DataStateHandler
+              loading={loadingParcelas}
+              error={null}
+              dataLength={parcelas.length}
+              emptyMessage="Nenhuma parcela encontrada para esta venda."
+            >
+              <Table
+                columns={colunasParcelas}
+                data={parcelas}
+                emptyMessage="Nenhuma parcela encontrada para esta venda."
+              />
+            </DataStateHandler>
           </div>
-          
-          <div style={{ 
-            marginTop: '20px',
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: '10px'
-          }}>
+        )}
+      </Modal>
+
+      {/* Modal de Nova Venda */}
+      <Modal
+        isOpen={modalNovaVenda}
+        onClose={() => setModalNovaVenda(false)}
+        title="Cadastrar Nova Venda"
+        size="large"
+      >
+        <VendasParcelasForm
+          clientes={clientes}
+          onSubmit={handleCadastrarVenda}
+          onCancel={() => setModalNovaVenda(false)}
+          isLoading={enviandoFormulario}
+        />
+      </Modal>
+
+      {/* Modal de Confirmação de Exclusão */}
+      <Modal
+        isOpen={modalConfirmacao}
+        onClose={() => setModalConfirmacao(false)}
+        title="Confirmar Exclusão"
+        size="small"
+      >
+        <div className="confirmation-modal">
+          <p className="mb-4">Tem certeza que deseja excluir esta venda e todas as suas parcelas? Esta ação não pode ser desfeita.</p>
+          <div className="flex justify-end gap-2">
             <button
-              type="button"
-              onClick={() => setIsOpen(false)}
-              style={{ 
-                padding: '8px 16px', 
-                backgroundColor: '#6c757d',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer'
-              }}
+              className="btn-outline"
+              onClick={() => setModalConfirmacao(false)}
             >
               Cancelar
             </button>
             <button
-              type="submit"
-              style={{ 
-                padding: '8px 16px', 
-                backgroundColor: '#1e293b',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer'
-              }}
+              className="btn-danger"
+              onClick={excluirVenda}
             >
-              Salvar
+              Excluir
             </button>
           </div>
-        </form>
+        </div>
       </Modal>
-      
-      <DataStateHandler
-        loading={loading}
-        error={error}
-        dataLength={vendas.length}
-        onRetry={fetchVendas}
-        emptyMessage="Nenhuma venda encontrada."
-      >
-        <Table
-          columns={colunas}
-          data={vendas}
-          emptyMessage="Nenhuma venda encontrada."
-        />
-      </DataStateHandler>
     </div>
   );
 } 

@@ -437,4 +437,79 @@ class ParcelaService:
             )
         )
         
-        return {"detail": "Parcela removida com sucesso"} 
+        return {"detail": "Parcela removida com sucesso"}
+
+    async def get_dashboard_parcelas(
+        self,
+        id_empresa: UUID,
+        dias_vencidas: int = 30,
+        dias_proximas: int = 15
+    ) -> Any:
+        """
+        Obter dados de parcelas para o dashboard.
+        
+        Args:
+            id_empresa: ID da empresa
+            dias_vencidas: Quantidade de dias para considerar parcelas vencidas
+            dias_proximas: Quantidade de dias para considerar próximas de vencer
+            
+        Returns:
+            Dados das parcelas para o dashboard
+        """
+        self.logger.info(f"Obtendo parcelas para dashboard: empresa={id_empresa}")
+        
+        try:
+            dados_dashboard = await self.repository.get_dashboard_data(
+                id_empresa=id_empresa,
+                dias_vencidas=dias_vencidas,
+                dias_proximas=dias_proximas
+            )
+            return dados_dashboard
+        except Exception as e:
+            self.logger.error(f"Erro ao obter dados para dashboard: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao obter dados para dashboard"
+            )
+            
+    async def get_recebimentos_dia(
+        self,
+        id_empresa: UUID,
+        data: date
+    ) -> float:
+        """
+        Calcular total de recebimentos em um dia específico.
+        
+        Args:
+            id_empresa: ID da empresa
+            data: Data para calcular os recebimentos
+            
+        Returns:
+            Total de recebimentos no dia
+        """
+        self.logger.info(f"Calculando recebimentos do dia {data}: empresa={id_empresa}")
+        
+        try:
+            # Buscar parcelas pagas na data especificada
+            filters = [
+                {"id_empresa": id_empresa},
+                {"status": StatusParcela.PAGO},
+                {"data_pagamento": data}
+            ]
+            
+            parcelas_pagas, _ = await self.repository.list_with_filters(
+                skip=0,
+                limit=1000,  # Valor alto para trazer todas
+                filters=filters
+            )
+            
+            # Calcular total recebido
+            total_recebido = sum(float(parcela.valor) for parcela in parcelas_pagas)
+            
+            return total_recebido
+        except Exception as e:
+            self.logger.error(f"Erro ao calcular recebimentos do dia: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao calcular recebimentos do dia"
+            ) 

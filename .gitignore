@@ -47,4 +47,23 @@ logs/
 
 # Arquivos temporários
 temp/
-tmp/ 
+tmp/
+
+# Node.js e Frontend
+node_modules/
+frontend/node_modules/
+npm-debug.log
+yarn-error.log
+yarn-debug.log
+.pnp/
+.pnp.js
+
+# Arquivos de build do frontend
+frontend/build/
+frontend/dist/
+frontend/.next/
+frontend/out/
+frontend/.cache/
+
+# Coverage do frontend
+frontend/coverage/ 

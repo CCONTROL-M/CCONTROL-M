@@ -19,10 +19,13 @@ export interface ContaBancaria {
   id_conta: string;
   nome: string;
   banco: string;
-  tipo: string;
-  numero: string;
   agencia: string;
+  conta: string;
+  tipo: string;
   saldo_inicial: number;
+  saldo_atual: number;
+  ativa: boolean;
+  mostrar_dashboard?: boolean;
   created_at: string;
 }
 
@@ -36,7 +39,9 @@ export interface Venda {
     documento?: string;
     tipo?: string;
   };
+  nome_cliente?: string;
   valor_total: number;
+  valor_pago?: number;
   numero_parcelas: number;
   data_venda?: string;
   data_inicio?: string;
@@ -54,8 +59,10 @@ export interface Venda {
 export interface Parcela {
   id_parcela: string;
   id_venda: string;
+  numero?: number;
   valor: number;
   data_vencimento: string;
+  data_pagamento?: string;
   status: string;
 }
 
@@ -110,6 +117,10 @@ export interface Conexao {
   nome: string;
   tipo: string;
   url: string;
+  usuario?: string;
+  senha?: string;
+  api_key?: string;
+  parametros_adicionais?: string;
 }
 
 export interface Parametro {

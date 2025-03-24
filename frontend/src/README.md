@@ -77,17 +77,17 @@ frontend/
 
 ## Modo Mock
 
-O sistema possui um modo mock para facilitar o desenvolvimento e testes quando a API backend não está disponível ou quando se deseja testar cenários específicos sem modificar dados reais.
+O sistema possui um modo mock para facilitar o desenvolvimento e testes quando se deseja testar cenários específicos sem modificar dados reais. **Este modo é destinado apenas para desenvolvimento e testes, não para uso em produção.**
 
 ### Como Ativar o Modo Mock
 
-Existem três maneiras de ativar o modo mock:
+Existem duas maneiras de ativar o modo mock:
 
-1. **Automático**: O sistema entra em modo mock automaticamente quando detecta que a API está offline.
+1. **Toggle na Interface (Apenas em Desenvolvimento)**: Um ícone de mock está disponível no canto inferior direito da aplicação **apenas em ambiente de desenvolvimento**, permitindo alternar entre o modo real e o mock.
 
-2. **Toggle na Interface**: Um ícone de mock está disponível no canto inferior direito da aplicação, permitindo alternar entre o modo real e o mock.
+2. **Variável de Ambiente**: Configure `VITE_MOCK_ENABLED=true` em seu arquivo `.env.local` para desenvolvimento local.
 
-3. **Variável de Ambiente**: Configure `VITE_MOCK_ENABLED=true` em seu arquivo `.env.local`.
+> **Importante**: O modo mock não é mais ativado automaticamente quando a API está offline. O sistema permanecerá no modo real mesmo em caso de erros de conectividade.
 
 ### Serviços com Suporte a Mock
 

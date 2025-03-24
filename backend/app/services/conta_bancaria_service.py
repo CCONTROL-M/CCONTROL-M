@@ -35,12 +35,12 @@ class ContaBancariaService:
         self.auditoria_service = auditoria_service
         self.logger = logger
         
-    async def get_conta_bancaria(self, id_conta_bancaria: UUID, id_empresa: UUID) -> ContaBancaria:
+    async def get_conta_bancaria(self, id_conta: UUID, id_empresa: UUID) -> ContaBancaria:
         """
         Obter conta bancária pelo ID.
         
         Args:
-            id_conta_bancaria: ID da conta bancária
+            id_conta: ID da conta bancária
             id_empresa: ID da empresa para validação de acesso
             
         Returns:
@@ -49,11 +49,11 @@ class ContaBancariaService:
         Raises:
             HTTPException: Se a conta bancária não for encontrada
         """
-        self.logger.info(f"Buscando conta bancária ID: {id_conta_bancaria}")
+        self.logger.info(f"Buscando conta bancária ID: {id_conta}")
         
-        conta_bancaria = await self.repository.get_by_id(id_conta_bancaria, id_empresa)
+        conta_bancaria = await self.repository.get_by_id(id_conta, id_empresa)
         if not conta_bancaria:
-            self.logger.warning(f"Conta bancária não encontrada: {id_conta_bancaria}")
+            self.logger.warning(f"Conta bancária não encontrada: {id_conta}")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Conta bancária não encontrada"
@@ -65,10 +65,7 @@ class ContaBancariaService:
         id_empresa: UUID,
         skip: int = 0,
         limit: int = 100,
-        nome: Optional[str] = None,
-        banco: Optional[str] = None,
-        tipo: Optional[str] = None,
-        ativo: Optional[bool] = None
+        filtros: Optional[Dict[str, Any]] = None
     ) -> Tuple[List[ContaBancaria], int]:
         """
         Listar contas bancárias com paginação e filtros.
@@ -77,34 +74,32 @@ class ContaBancariaService:
             id_empresa: ID da empresa
             skip: Número de registros a pular
             limit: Número máximo de registros a retornar
-            nome: Filtrar por nome
-            banco: Filtrar por banco
-            tipo: Filtrar por tipo de conta
-            ativo: Filtrar por status ativo
+            filtros: Dicionário de filtros (nome, banco, tipo, ativo)
             
         Returns:
             Lista de contas bancárias e contagem total
         """
-        self.logger.info(f"Buscando contas bancárias com filtros: empresa={id_empresa}, nome={nome}, banco={banco}")
+        self.logger.info(f"Buscando contas bancárias com filtros: empresa={id_empresa}, filtros={filtros}")
         
-        filters = [{"id_empresa": id_empresa}]
+        # Garantir que filtros seja um dicionário
+        if not filtros:
+            filtros = {}
+            
+        # Adicionar id_empresa aos filtros
+        filtros_lista = [{"id_empresa": id_empresa}]
         
-        if nome:
-            filters.append({"nome__ilike": f"%{nome}%"})
-            
-        if banco:
-            filters.append({"banco__ilike": f"%{banco}%"})
-            
-        if tipo:
-            filters.append({"tipo": tipo})
-            
-        if ativo is not None:
-            filters.append({"ativo": ativo})
+        # Adicionar demais filtros
+        for campo, valor in filtros.items():
+            if valor is not None:
+                if campo in ["nome", "banco"]:
+                    filtros_lista.append({f"{campo}__ilike": f"%{valor}%"})
+                else:
+                    filtros_lista.append({campo: valor})
             
         return await self.repository.list_with_filters(
             skip=skip,
             limit=limit,
-            filters=filters
+            filters=filtros_lista
         )
         
     async def criar_conta_bancaria(self, conta_bancaria: ContaBancariaCreate, id_usuario: UUID) -> ContaBancaria:
@@ -137,8 +132,8 @@ class ContaBancariaService:
             conta_bancaria_data = conta_bancaria.model_dump()
             
             # Definir como ativo por padrão se não especificado
-            if "ativo" not in conta_bancaria_data or conta_bancaria_data["ativo"] is None:
-                conta_bancaria_data["ativo"] = True
+            if "ativa" not in conta_bancaria_data or conta_bancaria_data["ativa"] is None:
+                conta_bancaria_data["ativa"] = True
                 
             # Definir saldo inicial como 0 se não especificado
             if "saldo_inicial" not in conta_bancaria_data or conta_bancaria_data["saldo_inicial"] is None:
@@ -149,30 +144,15 @@ class ContaBancariaService:
                 
             nova_conta = await self.repository.create(conta_bancaria_data)
             
-            # Registrar log
-            await self.log_service.registrar_log(
-                LogSistemaCreate(
-                    id_empresa=conta_bancaria.id_empresa,
-                    id_usuario=id_usuario,
-                    acao="criar_conta_bancaria",
-                    descricao=f"Conta bancária criada: {nova_conta.nome}",
-                    dados={
-                        "id_conta_bancaria": str(nova_conta.id_conta_bancaria), 
-                        "nome": nova_conta.nome,
-                        "saldo_inicial": float(nova_conta.saldo_inicial)
-                    }
-                )
-            )
-            
-            # Registrar ação
+            # Registrar auditoria
             await self.auditoria_service.registrar_acao(
                 usuario_id=id_usuario,
                 acao="CRIAR_CONTA_BANCARIA",
                 detalhes={
-                    "id_conta": str(nova_conta.id_conta_bancaria),
+                    "id_conta": str(nova_conta.id_conta),
+                    "nome": nova_conta.nome,
                     "banco": nova_conta.banco,
-                    "agencia": nova_conta.agencia,
-                    "numero": nova_conta.numero
+                    "saldo_inicial": float(nova_conta.saldo_inicial)
                 },
                 empresa_id=conta_bancaria.id_empresa
             )
@@ -185,12 +165,18 @@ class ContaBancariaService:
                 detail="Erro ao criar conta bancária"
             )
         
-    async def atualizar_conta_bancaria(self, id_conta_bancaria: UUID, conta_bancaria: ContaBancariaUpdate, id_empresa: UUID, id_usuario: UUID) -> ContaBancaria:
+    async def atualizar_conta_bancaria(
+        self, 
+        id_conta: UUID, 
+        conta_bancaria: ContaBancariaUpdate, 
+        id_empresa: UUID, 
+        id_usuario: UUID
+    ) -> ContaBancaria:
         """
         Atualizar conta bancária existente.
         
         Args:
-            id_conta_bancaria: ID da conta bancária a ser atualizada
+            id_conta: ID da conta bancária a ser atualizada
             conta_bancaria: Dados para atualização
             id_empresa: ID da empresa para validação de acesso
             id_usuario: ID do usuário que está atualizando a conta bancária
@@ -201,15 +187,15 @@ class ContaBancariaService:
         Raises:
             HTTPException: Se a conta bancária não for encontrada ou ocorrer erro na validação
         """
-        self.logger.info(f"Atualizando conta bancária: {id_conta_bancaria}")
+        self.logger.info(f"Atualizando conta bancária: {id_conta}")
         
         # Verificar se a conta bancária existe
-        conta_atual = await self.get_conta_bancaria(id_conta_bancaria, id_empresa)
+        conta_atual = await self.get_conta_bancaria(id_conta, id_empresa)
         
         # Verificar unicidade do nome se estiver sendo atualizado
         if conta_bancaria.nome:
             conta_existente = await self.repository.get_by_nome(conta_bancaria.nome, id_empresa)
-            if conta_existente and conta_existente.id_conta_bancaria != id_conta_bancaria:
+            if conta_existente and conta_existente.id_conta != id_conta:
                 self.logger.warning(f"Já existe uma conta bancária com o nome '{conta_bancaria.nome}' na empresa")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -218,9 +204,9 @@ class ContaBancariaService:
                 
         # Não permitir alterar saldo_inicial se já existirem lançamentos
         if conta_bancaria.saldo_inicial is not None and conta_bancaria.saldo_inicial != conta_atual.saldo_inicial:
-            tem_lancamentos = await self.lancamento_repository.has_by_conta_bancaria(id_conta_bancaria, id_empresa)
+            tem_lancamentos = await self.lancamento_repository.has_by_conta_bancaria(id_conta, id_empresa)
             if tem_lancamentos:
-                self.logger.warning(f"Não é possível alterar o saldo inicial de uma conta com lançamentos: {id_conta_bancaria}")
+                self.logger.warning(f"Não é possível alterar o saldo inicial de uma conta com lançamentos: {id_conta}")
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Não é possível alterar o saldo inicial de uma conta que já possui lançamentos"
@@ -237,40 +223,26 @@ class ContaBancariaService:
                 diferenca = update_data["saldo_inicial"] - conta_atual.saldo_inicial
                 update_data["saldo_atual"] = conta_atual.saldo_atual + diferenca
                 
-            conta_atualizada = await self.repository.update(id_conta_bancaria, update_data, id_empresa)
+            conta_atualizada = await self.repository.update(id_conta, update_data, id_empresa)
             
             if not conta_atualizada:
-                self.logger.warning(f"Conta bancária não encontrada após tentativa de atualização: {id_conta_bancaria}")
+                self.logger.warning(f"Conta bancária não encontrada após tentativa de atualização: {id_conta}")
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Conta bancária não encontrada"
                 )
-                
-            # Registrar log
-            await self.log_service.registrar_log(
-                LogSistemaCreate(
-                    id_empresa=id_empresa,
-                    id_usuario=id_usuario,
-                    acao="atualizar_conta_bancaria",
-                    descricao=f"Conta bancária atualizada: {conta_atualizada.nome}",
-                    dados={
-                        "id_conta_bancaria": str(id_conta_bancaria),
-                        "atualizacoes": {k: str(v) if isinstance(v, Decimal) else v for k, v in update_data.items()}
-                    }
-                )
-            )
             
-            # Registrar ação
+            # Registrar auditoria
             await self.auditoria_service.registrar_acao(
                 usuario_id=id_usuario,
                 acao="ATUALIZAR_CONTA_BANCARIA",
                 detalhes={
-                    "id_conta": str(id_conta_bancaria),
-                    "alteracoes": {k: str(v) if isinstance(v, Decimal) else v for k, v in update_data.items()}
+                    "id_conta": str(id_conta),
+                    "campos_alterados": list(update_data.keys())
                 },
                 empresa_id=id_empresa
             )
-            
+                
             return conta_atualizada
         except Exception as e:
             self.logger.error(f"Erro ao atualizar conta bancária: {str(e)}")
@@ -300,12 +272,12 @@ class ContaBancariaService:
         conta_bancaria = await self.get_conta_bancaria(id_conta_bancaria, id_empresa)
         
         # Verificar se já está ativa
-        if conta_bancaria.ativo:
+        if conta_bancaria.ativa:
             self.logger.warning(f"Conta bancária já está ativa: {id_conta_bancaria}")
             return conta_bancaria
             
         # Ativar conta bancária
-        update_data = {"ativo": True}
+        update_data = {"ativa": True}
         
         conta_atualizada = await self.repository.update(id_conta_bancaria, update_data, id_empresa)
         
@@ -351,12 +323,12 @@ class ContaBancariaService:
         conta_bancaria = await self.get_conta_bancaria(id_conta_bancaria, id_empresa)
         
         # Verificar se já está inativa
-        if not conta_bancaria.ativo:
+        if not conta_bancaria.ativa:
             self.logger.warning(f"Conta bancária já está inativa: {id_conta_bancaria}")
             return conta_bancaria
             
         # Desativar conta bancária
-        update_data = {"ativo": False}
+        update_data = {"ativa": False}
         
         conta_atualizada = await self.repository.update(id_conta_bancaria, update_data, id_empresa)
         
@@ -404,7 +376,7 @@ class ContaBancariaService:
         conta_bancaria = await self.get_conta_bancaria(id_conta_bancaria, id_empresa)
         
         # Verificar se a conta está ativa
-        if not conta_bancaria.ativo:
+        if not conta_bancaria.ativa:
             self.logger.warning(f"Não é possível ajustar o saldo de uma conta inativa: {id_conta_bancaria}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -454,14 +426,13 @@ class ContaBancariaService:
         
         return conta_atualizada
         
-    async def remover_conta_bancaria(self, id_conta_bancaria: UUID, id_empresa: UUID, id_usuario: UUID) -> Dict[str, Any]:
+    async def remover_conta_bancaria(self, id_conta: UUID, id_empresa: UUID) -> Dict[str, Any]:
         """
-        Remover conta bancária pelo ID.
+        Remover conta bancária.
         
         Args:
-            id_conta_bancaria: ID da conta bancária a ser removida
+            id_conta: ID da conta bancária a ser removida
             id_empresa: ID da empresa para validação de acesso
-            id_usuario: ID do usuário que está removendo a conta bancária
             
         Returns:
             Mensagem de confirmação
@@ -469,45 +440,36 @@ class ContaBancariaService:
         Raises:
             HTTPException: Se a conta bancária não for encontrada ou não puder ser removida
         """
-        self.logger.info(f"Removendo conta bancária: {id_conta_bancaria}")
+        self.logger.info(f"Removendo conta bancária: {id_conta}")
         
         # Verificar se a conta bancária existe
-        conta_bancaria = await self.get_conta_bancaria(id_conta_bancaria, id_empresa)
+        conta = await self.get_conta_bancaria(id_conta, id_empresa)
         
-        # Verificar se tem lançamentos associados
-        tem_lancamentos = await self.lancamento_repository.has_by_conta_bancaria(id_conta_bancaria, id_empresa)
+        # Verificar se há lançamentos vinculados
+        tem_lancamentos = await self.lancamento_repository.has_by_conta_bancaria(id_conta, id_empresa)
         if tem_lancamentos:
-            self.logger.warning(f"Conta bancária possui lançamentos associados: {id_conta_bancaria}")
+            self.logger.warning(f"Não é possível remover conta bancária com lançamentos: {id_conta}")
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Não é possível remover uma conta bancária com lançamentos associados"
+                detail="Não é possível remover conta bancária que possui lançamentos vinculados"
             )
             
         # Remover conta bancária
-        await self.repository.delete(id_conta_bancaria, id_empresa)
-        
-        # Registrar log
-        await self.log_service.registrar_log(
-            LogSistemaCreate(
-                id_empresa=id_empresa,
-                id_usuario=id_usuario,
-                acao="remover_conta_bancaria",
-                descricao=f"Conta bancária removida: {conta_bancaria.nome}",
-                dados={"id_conta_bancaria": str(id_conta_bancaria), "nome": conta_bancaria.nome}
-            )
-        )
-        
-        # Registrar ação
-        await self.auditoria_service.registrar_acao(
-            usuario_id=id_usuario,
-            acao="EXCLUIR_CONTA_BANCARIA",
-            detalhes={
-                "id_conta": str(id_conta_bancaria),
-                "banco": conta_bancaria.banco,
-                "agencia": conta_bancaria.agencia,
-                "numero": conta_bancaria.numero
-            },
-            empresa_id=id_empresa
-        )
-        
-        return {"detail": f"Conta bancária '{conta_bancaria.nome}' removida com sucesso"} 
+        try:
+            resultado = await self.repository.delete(id_conta, id_empresa)
+            if not resultado:
+                self.logger.warning(f"Conta bancária não encontrada ou já removida: {id_conta}")
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Conta bancária não encontrada"
+                )
+                
+            return {"message": "Conta bancária removida com sucesso", "id": str(id_conta)}
+        except Exception as e:
+            self.logger.error(f"Erro ao remover conta bancária: {str(e)}")
+            if isinstance(e, HTTPException):
+                raise e
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro ao remover conta bancária"
+            ) 

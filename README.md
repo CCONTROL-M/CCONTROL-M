@@ -112,11 +112,11 @@ Para facilitar o desenvolvimento e implantação, o sistema também suporta o Su
 
 ## 📚 Documentação
 
-- [Guia de Início Rápido](docs/guides/quickstart.md)
-- [Documentação da API](docs/api/README.md)
-- [Arquitetura](docs/architecture/README.md)
-- [Guia de Desenvolvimento](docs/guides/development.md)
-- [Catálogo de Erros](docs/errors/README.md)
+A documentação completa do projeto está disponível na pasta [docs/](./docs/):
+
+- [Documentação de Instalação](./docs/INSTALACAO.md)
+- [Documentação Técnica](./docs/README.md)
+- [Documentação de Testes Automatizados](./docs/TESTES.md) ✨ NOVO!
 
 ## 🔐 Segurança
 
@@ -231,6 +231,16 @@ frontend/
 │   ├── index.css     # Estilos globais
 │   └── main.tsx      # Ponto de entrada
 ```
+
+### Modo Mock do Frontend
+
+O frontend possui um modo mock para desenvolvimento e testes, que permite utilizar dados fictícios sem depender da API backend. Importante ressaltar:
+
+- O modo mock está disponível **apenas em ambiente de desenvolvimento**.
+- Um botão de toggle é exibido no canto inferior direito da aplicação em desenvolvimento.
+- O modo mock pode ser ativado definindo `VITE_MOCK_ENABLED=true` no arquivo `.env.local`.
+- O sistema NÃO entra automaticamente em modo mock quando a API está offline.
+- Para mais detalhes, consulte o arquivo `frontend/src/README.md`.
 
 ### Convenções de Nomenclatura
 

@@ -41,6 +41,10 @@ class Lancamento(Base, TimestampedModel):
         ForeignKey("vendas.id_venda", ondelete="SET NULL"),
         nullable=True
     )
+    id_categoria: Mapped[Optional[uuid.UUID]] = mapped_column(
+        ForeignKey("categorias.id_categoria", ondelete="SET NULL"),
+        nullable=True
+    )
     descricao: Mapped[str] = mapped_column(String, nullable=False)
     tipo: Mapped[str] = mapped_column(
         Enum("entrada", "saida", name="tipo_lancamento"),
@@ -66,6 +70,7 @@ class Lancamento(Base, TimestampedModel):
     conta_bancaria = relationship("ContaBancaria", back_populates="lancamentos")
     forma_pagamento = relationship("FormaPagamento", back_populates="lancamentos")
     venda = relationship("Venda", back_populates="lancamentos")
+    categoria = relationship("Categoria", back_populates="lancamentos")
     parcelas = relationship("Parcela", back_populates="lancamento")
     
     def __repr__(self) -> str:

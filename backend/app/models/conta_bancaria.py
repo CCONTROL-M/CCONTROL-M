@@ -3,6 +3,7 @@ import uuid
 from typing import Optional, List
 from sqlalchemy import String, Float, Boolean, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from datetime import datetime
 
 from app.database import Base
 from app.models.base_model import TimestampedModel
@@ -26,10 +27,10 @@ class ContaBancaria(Base, TimestampedModel):
         ForeignKey("empresas.id_empresa", ondelete="CASCADE")
     )
     nome: Mapped[str] = mapped_column(String, nullable=False)
-    banco: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    agencia: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    numero: Mapped[Optional[str]] = mapped_column(String, nullable=True)
-    tipo: Mapped[str] = mapped_column(String, nullable=False)
+    banco: Mapped[str] = mapped_column(String, nullable=False)
+    agencia: Mapped[str] = mapped_column(String, nullable=False)
+    conta: Mapped[str] = mapped_column(String, nullable=False)
+    tipo: Mapped[str] = mapped_column(String, nullable=False)  # "corrente" ou "poupança"
     saldo_inicial: Mapped[float] = mapped_column(Float, default=0.0)
     saldo_atual: Mapped[float] = mapped_column(Float, default=0.0)
     ativa: Mapped[bool] = mapped_column(Boolean, default=True)

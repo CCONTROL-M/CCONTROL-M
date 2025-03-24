@@ -1,68 +1,77 @@
 import React, { useState } from 'react';
 import Modal from './Modal';
 import FormField from './FormField';
+import useFormHandler from '../hooks/useFormHandler';
+
+// Definir a interface do formulário
+interface FormularioExemplo {
+  nome: string;
+  email: string;
+}
 
 const ExemploModal: React.FC = () => {
   const [isOpen, setIsOpen] = useState<boolean>(false);
-  const [formData, setFormData] = useState({
+  
+  // Valores iniciais do formulário
+  const formularioVazio: FormularioExemplo = {
     nome: '',
-    email: '',
-  });
-  const [errors, setErrors] = useState<{
-    nome?: string;
-    email?: string;
-  }>({});
+    email: ''
+  };
+  
+  // Usar o hook useFormHandler para gerenciar o formulário
+  const { 
+    formData, 
+    formErrors, 
+    handleInputChange, 
+    validate,
+    resetForm
+  } = useFormHandler<FormularioExemplo>(formularioVazio);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target;
-    setFormData({
-      ...formData,
-      [name]: value,
-    });
-
-    // Limpar erro do campo quando o usuário digitar
-    if (errors[name as keyof typeof errors]) {
-      setErrors({
-        ...errors,
-        [name]: undefined,
-      });
+  // Regras de validação
+  const validationRules: Record<keyof FormularioExemplo, any> = {
+    nome: {
+      required: true,
+      minLength: 3,
+    },
+    email: {
+      required: true,
+      pattern: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+      custom: (value: string) => {
+        // Validação adicional personalizada se necessário
+        return undefined;
+      }
     }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validação simples
-    const newErrors: {
-      nome?: string;
-      email?: string;
-    } = {};
+    // Validar todos os campos
+    const isValid = validate(validationRules);
     
-    if (!formData.nome.trim()) {
-      newErrors.nome = 'Nome é obrigatório';
+    if (isValid) {
+      // Simulação de envio bem-sucedido
+      alert(`Formulário enviado com sucesso!\nNome: ${formData.nome}\nE-mail: ${formData.email}`);
+      setIsOpen(false);
+      resetForm(); // Resetar o formulário ao fechar
     }
-    
-    if (!formData.email.trim()) {
-      newErrors.email = 'E-mail é obrigatório';
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'E-mail inválido';
-    }
-    
-    if (Object.keys(newErrors).length > 0) {
-      setErrors(newErrors);
-      return;
-    }
-    
-    // Simulação de envio bem-sucedido
-    alert(`Formulário enviado com sucesso!\nNome: ${formData.nome}\nE-mail: ${formData.email}`);
+  };
+
+  // Função para abrir o modal e resetar o formulário
+  const abrirModal = () => {
+    resetForm();
+    setIsOpen(true);
+  };
+
+  // Função para fechar o modal
+  const fecharModal = () => {
     setIsOpen(false);
-    setFormData({ nome: '', email: '' });
   };
 
   return (
     <div>
       <button 
-        onClick={() => setIsOpen(true)}
+        onClick={abrirModal}
         style={{ 
           padding: '8px 16px', 
           backgroundColor: '#1e293b',
@@ -77,7 +86,7 @@ const ExemploModal: React.FC = () => {
       
       <Modal
         isOpen={isOpen}
-        onClose={() => setIsOpen(false)}
+        onClose={fecharModal}
         title="Exemplo de Formulário"
       >
         <form onSubmit={handleSubmit}>
@@ -85,8 +94,8 @@ const ExemploModal: React.FC = () => {
             label="Nome"
             name="nome"
             value={formData.nome}
-            onChange={handleChange}
-            error={errors.nome}
+            onChange={handleInputChange}
+            error={formErrors.nome}
             required
           />
           
@@ -95,8 +104,8 @@ const ExemploModal: React.FC = () => {
             name="email"
             type="email"
             value={formData.email}
-            onChange={handleChange}
-            error={errors.email}
+            onChange={handleInputChange}
+            error={formErrors.email}
             placeholder="exemplo@email.com"
             required
           />
@@ -109,7 +118,7 @@ const ExemploModal: React.FC = () => {
           }}>
             <button
               type="button"
-              onClick={() => setIsOpen(false)}
+              onClick={fecharModal}
               style={{ 
                 padding: '8px 16px', 
                 backgroundColor: '#6c757d',

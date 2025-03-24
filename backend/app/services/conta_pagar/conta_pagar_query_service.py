@@ -4,6 +4,7 @@ from typing import Dict, Any, List, Optional
 from datetime import date, datetime
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import Depends, HTTPException, status
+import logging
 
 from app.database import get_async_session
 from app.repositories.conta_pagar_repository import ContaPagarRepository
@@ -162,6 +163,39 @@ class ContaPagarQueryService:
         )
         
         return resumo
+        
+    async def get_pagamentos_dia(
+        self,
+        empresa_id: UUID,
+        data: date
+    ) -> float:
+        """
+        Calcular total de pagamentos em um dia específico.
+        
+        Parameters:
+            empresa_id: ID da empresa
+            data: Data para calcular os pagamentos
+            
+        Returns:
+            Total de pagamentos no dia
+        """
+        try:
+            # Buscar contas pagas na data especificada
+            contas_pagas = await self.repository.get_by_filters(
+                filters={
+                    "empresa_id": empresa_id,
+                    "status": "pago",
+                    "data_pagamento": data
+                }
+            )
+            
+            # Calcular total pago
+            total_pago = sum(float(conta.valor_pago or 0) for conta in contas_pagas)
+            
+            return total_pago
+        except Exception as e:
+            logging.error(f"Erro ao calcular pagamentos do dia: {str(e)}")
+            return 0.0
         
     async def buscar_contas_por_fornecedor(
         self,

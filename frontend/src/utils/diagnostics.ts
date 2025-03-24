@@ -10,7 +10,7 @@ import { useMock } from './mock';
 export async function runDiagnostics() {
   // Verificar ambiente
   const environment = {
-    nodeEnv: process.env.NODE_ENV || import.meta.env.MODE,
+    nodeEnv: import.meta.env.MODE,
     mockEnabled: useMock(),
     baseUrl: window.location.origin,
     currentPath: window.location.pathname,

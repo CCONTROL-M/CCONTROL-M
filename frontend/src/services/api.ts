@@ -16,10 +16,10 @@ const getAuthToken = () => {
   return localStorage.getItem('token');
 };
 
-// Obter a URL da API das variáveis de ambiente ou usar caminho relativo
-const API_URL = ''; // URL vazia para usar caminhos relativos com o proxy do Vite
+// Obter a URL da API das variáveis de ambiente
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
 
-console.log("API configurada para usar proxy do Vite");
+console.log("API configurada para URL:", API_URL);
 
 const api: AxiosInstance = axios.create({
   baseURL: API_URL,
@@ -34,7 +34,11 @@ const api: AxiosInstance = axios.create({
 let isAPIOffline = false;
 let lastServerError: Error | AxiosError | null = null;
 let lastCheckTime = 0;
-const MIN_CHECK_INTERVAL = 10000; // Mínimo de 10 segundos entre verificações de status
+const MIN_CHECK_INTERVAL = 30000; // Reduzir para 30 segundos entre verificações (antes 120000)
+let healthCheckAttempts = 0;
+const MAX_HEALTH_CHECK_ATTEMPTS = 5; // Aumentar para 5 tentativas (antes 2)
+let healthCheckBlocked = false;
+let errorLogged = false; // Evitar logs de erros repetidos
 
 // Interceptor para adicionar token de autenticação a todas as requisições
 api.interceptors.request.use(
@@ -49,14 +53,13 @@ api.interceptors.request.use(
       config.retryCount = 0;
     }
     
-    // Log de requisição para debugging
-    console.log(`Requisição para: ${config.method?.toUpperCase()} ${config.baseURL}${config.url}`, {
-      url: config.url,
-      params: config.params,
-      withCredentials: config.withCredentials,
-      headers: config.headers,
-      retryCount: config.retryCount
-    });
+    // Log de requisição apenas em desenvolvimento
+    if (import.meta.env.DEV) {
+      console.log(`Requisição: ${config.method?.toUpperCase()} ${config.url}`, {
+        params: config.params,
+        retryCount: config.retryCount
+      });
+    }
     
     return config;
   },
@@ -86,12 +89,14 @@ const getRetryDelay = (retryCount: number): number => {
 // Interceptor para tratar erros de resposta com retry
 api.interceptors.response.use(
   (response: AxiosResponse) => {
-    // Log de resposta bem-sucedida
-    console.log(`Resposta de ${response.config.url}:`, {
-      status: response.status,
-      hasData: !!response.data,
-      dataType: response.data ? (Array.isArray(response.data) ? 'array' : typeof response.data) : null,
-    });
+    // Log de resposta bem-sucedida em desenvolvimento
+    if (import.meta.env.DEV) {
+      console.log(`Resposta de ${response.config.url}:`, {
+        status: response.status,
+        hasData: !!response.data,
+        dataType: response.data ? (Array.isArray(response.data) ? 'array' : typeof response.data) : null,
+      });
+    }
     
     // Se a API estava offline e agora respondeu, resetar o status
     if (isAPIOffline) {
@@ -106,8 +111,12 @@ api.interceptors.response.use(
     // Obter a configuração da requisição original
     const originalConfig = error.config as CustomAxiosRequestConfig;
     
+    // Verificar se a requisição tem a flag X-No-Retry
+    const noRetry = originalConfig.headers && 'X-No-Retry' in originalConfig.headers;
+    
     // Se é um erro que podemos tentar novamente e não excedemos o número máximo de tentativas
-    if (isRetryableError(error) && originalConfig.retryCount !== undefined && originalConfig.retryCount < 3) {
+    // e não tem a flag de no-retry
+    if (!noRetry && isRetryableError(error) && originalConfig.retryCount !== undefined && originalConfig.retryCount < 3) {
       // Incrementar o contador de tentativas
       originalConfig.retryCount++;
       
@@ -137,10 +146,13 @@ api.interceptors.response.use(
     if (isRetryableError(error) && originalConfig.retryCount !== undefined && originalConfig.retryCount >= 3) {
       isAPIOffline = true;
       lastServerError = error;
-      console.error("🔴 API parece estar offline após 3 tentativas", {
-        url: originalConfig.url,
-        error: error.message
-      });
+      // Logar erro apenas se não for uma requisição de health check
+      if (!originalConfig.url?.includes('/health')) {
+        console.error("🔴 API parece estar offline após 3 tentativas", {
+          url: originalConfig.url,
+          error: error.message
+        });
+      }
     }
     
     // Tratamento específico por tipo de erro
@@ -183,32 +195,103 @@ api.interceptors.response.use(
 export const verificarStatusAPI = async (): Promise<{ online: boolean; error: Error | AxiosError | null }> => {
   const now = Date.now();
   
+  // Se as verificações estiverem bloqueadas, retorne o status offline imediatamente
+  if (healthCheckBlocked) {
+    console.log("Verificação de API bloqueada, assumindo offline");
+    return { online: false, error: lastServerError };
+  }
+  
   // Limitar a frequência de verificações para reduzir logs e requisições
   if (now - lastCheckTime < MIN_CHECK_INTERVAL) {
+    console.log(`Verificação muito recente, usando cache: ${!isAPIOffline ? 'online' : 'offline'}`);
     return { online: !isAPIOffline, error: lastServerError };
   }
   
-  lastCheckTime = now;
-  
-  try {
-    await api.get('/api/v1/health', { timeout: 3000 });
-    
-    // Se estava offline e agora está online, logar a informação
-    if (isAPIOffline) {
-      console.info("🟢 Conexão com a API restaurada");
+  // Se já atingiu o número máximo de tentativas, bloquear por 2 minutos (antes 5 minutos)
+  if (healthCheckAttempts >= MAX_HEALTH_CHECK_ATTEMPTS) {
+    if (!errorLogged) {
+      console.warn(`🔒 Verificação de API bloqueada após ${MAX_HEALTH_CHECK_ATTEMPTS} tentativas. Aguardando 2 minutos.`);
+      errorLogged = true;
     }
     
+    healthCheckBlocked = true;
+    
+    // Desbloquear após 2 minutos (antes 5 minutos - 300000)
+    setTimeout(() => {
+      healthCheckBlocked = false;
+      healthCheckAttempts = 0;
+      errorLogged = false;
+      console.info("🔓 Verificação de API desbloqueada. Novas tentativas serão permitidas.");
+    }, 120000); // 2 minutos
+    
+    return { online: false, error: lastServerError };
+  }
+  
+  lastCheckTime = now;
+  console.log("Iniciando verificação de API...");
+  
+  try {
+    // Criar uma Promise com timeout manual para evitar mensagens de erro repetidas
+    const timeoutPromise = new Promise<{ data: any }>((_, reject) => {
+      setTimeout(() => {
+        reject(new Error('⏱️ Timeout ao verificar API'));
+      }, 3000); // Aumentado para 3s (antes 800ms)
+    });
+    
+    // Criar a Promise da requisição real
+    const fetchPromise = api.get('/v1/health', { 
+      timeout: 5000,  // Aumentado para 5s (antes 1000ms)
+      headers: {
+        'X-No-Retry': 'true'
+      }
+    });
+    
+    // Usar race para pegar o que completar primeiro
+    await Promise.race([fetchPromise, timeoutPromise]);
+    
+    // Se chegou aqui, a requisição foi bem-sucedida
+    if (isAPIOffline) {
+      console.info("🟢 Conexão com a API restaurada");
+      errorLogged = false;
+    }
+    
+    // Resetar contadores
     isAPIOffline = false;
+    healthCheckAttempts = 0;
     return { online: true, error: null };
-  } catch (error) {
+  } catch (err) {
+    // Incrementar contador de tentativas
+    healthCheckAttempts++;
+    
+    // Tratar erro como Error ou AxiosError para tipagem
+    const error = err as Error | AxiosError;
+    
+    // Verificar se é um erro de timeout e tratar especificamente
+    const axiosError = error as AxiosError;
+    const isTimeout = axiosError.code === 'ECONNABORTED' || 
+                     (axiosError.message && axiosError.message.includes('timeout')) ||
+                     error.message === '⏱️ Timeout ao verificar API';
+    
     // Se não estava offline antes, logar o erro apenas uma vez
-    if (!isAPIOffline) {
-      console.error("🔴 API não está respondendo. Usando dados mockados.", error);
+    if (!isAPIOffline && !errorLogged) {
+      // Mensagem amigável para timeout
+      if (isTimeout) {
+        console.warn(`⏱️ Timeout ao verificar API (${healthCheckAttempts}/${MAX_HEALTH_CHECK_ATTEMPTS})`);
+      } else {
+        console.error(`🔴 API não está respondendo (${healthCheckAttempts}/${MAX_HEALTH_CHECK_ATTEMPTS})`);
+      }
+      errorLogged = true;
+    } else if (healthCheckAttempts === MAX_HEALTH_CHECK_ATTEMPTS && !errorLogged) {
+      console.warn(`⚠️ Atingido limite de tentativas (${MAX_HEALTH_CHECK_ATTEMPTS}). Pausando verificações.`);
+      errorLogged = true;
     }
     
     isAPIOffline = true;
-    lastServerError = error as Error | AxiosError;
-    return { online: false, error: lastServerError };
+    // Só atualizar lastServerError se não for um timeout, para evitar mensagens genéricas
+    if (!isTimeout) {
+      lastServerError = error as Error | AxiosError;
+    }
+    return { online: false, error: isTimeout ? new Error('Timeout ao verificar API') : lastServerError };
   }
 };
 
@@ -219,5 +302,21 @@ export const getStatusAPI = (): APIStatus => {
     lastError: lastServerError
   };
 };
+
+// Função utilitária para verificação segura de arrays
+export function safeArray<T>(input: any): T[] {
+  if (Array.isArray(input) && input.length > 0) {
+    return input;
+  }
+  return [];
+}
+
+// Função utilitária para verificação segura de objetos
+export function safeObject<T>(input: any, defaultValue: T): T {
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    return input as T;
+  }
+  return defaultValue;
+}
 
 export default api; 

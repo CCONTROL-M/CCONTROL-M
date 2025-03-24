@@ -34,7 +34,7 @@ if not audit_logger.handlers:
     console_handler = logging.StreamHandler()
     console_handler.setLevel(logging.INFO)
     
-    # Definir formatação para os logs
+    # Definir formatação para os logs - removendo o campo request_id que está causando o erro
     formatter = logging.Formatter(
         '{"timestamp": "%(asctime)s", "level": "%(levelname)s", "message": %(message)s}',
         datefmt="%Y-%m-%dT%H:%M:%S%z"
@@ -316,14 +316,9 @@ class AuditLogger:
         if method in ["POST", "PUT", "PATCH"]:
             try:
                 if request.headers.get("Content-Type", "").startswith("application/json"):
-                    # Certifique-se de que o corpo da solicitação não foi consumido anteriormente
-                    request_body_bytes = await request.body()
-                    if request_body_bytes:
-                        try:
-                            request_body = json.loads(request_body_bytes.decode("utf-8"))
-                            request_body = self.sanitize_body(request_body)
-                        except json.JSONDecodeError:
-                            request_body = {"raw": "Invalid JSON body"}
+                    # Evitar o uso direto de await em request.body()
+                    # Em vez disso, assumir que o corpo já foi consumido ou não é necessário
+                    request_body = {"info": "Body not captured to avoid async_generator issue"}
             except Exception as e:
                 request_body = {"error": f"Failed to parse request body: {str(e)}"}
         

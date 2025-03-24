@@ -1,6 +1,7 @@
-import React, { createContext, useState, useContext, useEffect, useCallback } from 'react';
+import React, { createContext, useState, useContext, useEffect, useCallback, useRef } from 'react';
 import { verificarStatusAPI } from '../services/api';
 import { AxiosError } from 'axios';
+import { useMock } from '../utils/mock';
 
 // Interface para o estado do contexto
 interface ApiStatusContextState {
@@ -20,8 +21,8 @@ const ApiStatusContext = createContext<ApiStatusContextState>({
   verificandoStatus: false
 });
 
-// Intervalo para verificação automática (30 segundos)
-const INTERVALO_VERIFICACAO = 30000;
+// Intervalo para verificação automática aumentado para 2 minutos
+const INTERVALO_VERIFICACAO = 120000;
 
 interface ApiStatusProviderProps {
   children: React.ReactNode;
@@ -32,19 +33,38 @@ export const ApiStatusProvider: React.FC<ApiStatusProviderProps> = ({ children }
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
   const [ultimaVerificacao, setUltimaVerificacao] = useState<Date | null>(null);
   const [verificandoStatus, setVerificandoStatus] = useState<boolean>(false);
+  
+  // Usar ref para rastrear verificações em andamento
+  const verificacaoEmAndamentoRef = useRef<boolean>(false);
+  
+  // Verificar se o modo mock está ativado
+  const isMockEnabled = useMock();
 
   // Função para verificar o status da API
   const verificarStatus = useCallback(async (origem: 'automático' | 'manual' = 'automático') => {
-    // Evitar múltiplas verificações simultâneas
-    if (verificandoStatus) return;
+    // Evitar verificações quando o modo mock está ativado (exceto verificações manuais)
+    if (isMockEnabled && origem === 'automático') {
+      return { online: true, error: null };
+    }
     
-    setVerificandoStatus(true);
+    // Evitar múltiplas verificações simultâneas usando uma ref
+    if (verificacaoEmAndamentoRef.current) return;
+    verificacaoEmAndamentoRef.current = true;
+    
+    // Apenas definir estado para verificações manuais
+    if (origem === 'manual') {
+      setVerificandoStatus(true);
+    }
     
     try {
       const agora = new Date();
       const resultado = await verificarStatusAPI();
       
-      setApiOnline(resultado.online);
+      // Prevenir atualizações de estado desnecessárias
+      if (resultado.online !== apiOnline) {
+        setApiOnline(resultado.online);
+      }
+      
       setUltimaVerificacao(agora);
       
       // Formatar mensagem de erro se houver
@@ -58,47 +78,75 @@ export const ApiStatusProvider: React.FC<ApiStatusProviderProps> = ({ children }
           mensagem = erro.message;
         }
         
-        setMensagemErro(mensagem);
-      } else {
+        if (mensagemErro !== mensagem) {
+          setMensagemErro(mensagem);
+        }
+      } else if (mensagemErro !== null) {
         setMensagemErro(null);
       }
       
-      // Log de status
-      console.log(
-        `[API Status] ${resultado.online ? '🟢 Online' : '🔴 Offline'} | ${agora.toLocaleTimeString()} | Origem: ${origem}`,
-        resultado.online ? '' : `\nErro: ${mensagemErro}`
-      );
+      return resultado;
     } catch (erro) {
-      setApiOnline(false);
-      setMensagemErro('Erro ao verificar status da API');
+      if (apiOnline) {
+        setApiOnline(false);
+      }
+      
+      const mensagem = 'Erro ao verificar status da API';
+      if (mensagemErro !== mensagem) {
+        setMensagemErro(mensagem);
+      }
+      
       setUltimaVerificacao(new Date());
       
-      console.error('[API Status] Erro ao verificar status', erro);
+      if (origem === 'manual') {
+        console.error('[API Status] Erro ao verificar status', erro);
+      }
+      
+      return { online: false, error: erro };
     } finally {
-      setVerificandoStatus(false);
+      verificacaoEmAndamentoRef.current = false;
+      if (origem === 'manual') {
+        setVerificandoStatus(false);
+      }
     }
-  }, [verificandoStatus, mensagemErro]);
-
-  // Função para forçar a verificação do status
+  }, [isMockEnabled, apiOnline, mensagemErro]);
+  
+  // Função exposta para forçar verificação manual
   const forcarVerificacao = useCallback(async () => {
     await verificarStatus('manual');
   }, [verificarStatus]);
-
+  
   // Efeito para verificar o status da API ao iniciar e periodicamente
   useEffect(() => {
-    // Verificação inicial
-    verificarStatus('automático');
+    // Não fazer verificações automáticas se o mock estiver ativado
+    if (isMockEnabled) return;
     
-    // Configurar verificação periódica
-    const intervalo = setInterval(() => {
-      verificarStatus('automático');
-    }, INTERVALO_VERIFICACAO);
+    let isMounted = true;
+    let intervalId: number;
+    
+    // Função segura para verificação
+    const checkStatus = async () => {
+      if (!isMounted) return;
+      await verificarStatus('automático');
+    };
+    
+    // Verificar após um delay inicial para não atrapalhar a renderização
+    const timeoutId = setTimeout(() => {
+      if (isMounted) {
+        checkStatus();
+        
+        // Iniciar verificações periódicas
+        intervalId = window.setInterval(checkStatus, INTERVALO_VERIFICACAO);
+      }
+    }, 5000); // Aumentar o delay inicial para 5 segundos
     
     // Limpeza ao desmontar
     return () => {
-      clearInterval(intervalo);
+      isMounted = false;
+      clearTimeout(timeoutId);
+      clearInterval(intervalId);
     };
-  }, [verificarStatus]);
+  }, [verificarStatus, isMockEnabled]);
 
   // Valor do contexto
   const contextValue: ApiStatusContextState = {
@@ -116,11 +164,11 @@ export const ApiStatusProvider: React.FC<ApiStatusProviderProps> = ({ children }
   );
 };
 
-// Hook para usar o estado da API
+// Hook para usar o contexto
 export const useApiStatus = (): ApiStatusContextState => {
   const context = useContext(ApiStatusContext);
   
-  if (context === undefined) {
+  if (!context) {
     throw new Error('useApiStatus deve ser usado dentro de um ApiStatusProvider');
   }
   

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useMock } from '../utils/mock';
 import { useApiStatus } from '../contexts/ApiStatusContext';
 
@@ -20,6 +20,9 @@ const APIStatusBanner: React.FC = () => {
   // Estado para rastrear se a API estava offline anteriormente
   const [wasOffline, setWasOffline] = useState<boolean>(false);
   
+  // Referência para o timer de esconder o banner
+  const hideTimerRef = useRef<number | null>(null);
+  
   // Verificar se o modo mock está ativado
   const mockEnabled = useMock();
   
@@ -27,30 +30,40 @@ const APIStatusBanner: React.FC = () => {
   const { apiOnline, mensagemErro } = useApiStatus();
 
   useEffect(() => {
+    // Limpar qualquer timer existente
+    if (hideTimerRef.current) {
+      clearTimeout(hideTimerRef.current);
+      hideTimerRef.current = null;
+    }
+    
     // Se o modo mock está ativado, mostrar um banner informativo
     if (mockEnabled) {
-      console.log('Mock ativado - exibindo banner de aviso');
-      setBannerState({
-        show: true,
-        type: 'warning',
-        message: '⚠️ Usando dados de exemplo (modo simulado)'
-      });
+      // Evitar atualizações desnecessárias do estado
+      if (!bannerState.show || bannerState.type !== 'warning' || 
+          bannerState.message !== '⚠️ Usando dados de exemplo (modo simulado)') {
+        setBannerState({
+          show: true,
+          type: 'warning',
+          message: '⚠️ Usando dados de exemplo (modo simulado)'
+        });
+      }
       return;
     }
     
     // Gerenciar estado do banner baseado no status da API
     if (!apiOnline) {
-      // API está offline
-      console.log('API offline - exibindo banner de erro');
-      setBannerState({
-        show: true,
-        type: 'error',
-        message: mensagemErro ? `🔴 ${mensagemErro}` : '🔴 Servidor indisponível. Usando dados locais...'
-      });
+      // API está offline - Evitar atualizações desnecessárias
+      const newMessage = mensagemErro ? `🔴 ${mensagemErro}` : '🔴 Servidor indisponível. Usando dados locais...';
+      if (!bannerState.show || bannerState.type !== 'error' || bannerState.message !== newMessage) {
+        setBannerState({
+          show: true,
+          type: 'error',
+          message: newMessage
+        });
+      }
       setWasOffline(true);
     } else if (apiOnline && wasOffline) {
       // API estava offline e agora está online novamente
-      console.log('API restaurada - exibindo banner de sucesso');
       setBannerState({
         show: true,
         type: 'success',
@@ -58,23 +71,30 @@ const APIStatusBanner: React.FC = () => {
       });
       
       // Esconder o banner de sucesso após 3 segundos
-      setTimeout(() => {
+      hideTimerRef.current = window.setTimeout(() => {
         setBannerState(prev => ({ ...prev, show: false }));
+        hideTimerRef.current = null;
       }, 3000);
       
       setWasOffline(false);
     } else if (apiOnline && !wasOffline) {
       // API está online desde o início, não mostrar banner
-      setBannerState({ show: false, type: 'success', message: '' });
+      // Evitar atualizações desnecessárias do estado
+      if (bannerState.show) {
+        setBannerState({ show: false, type: 'success', message: '' });
+      }
     }
-  }, [apiOnline, mensagemErro, wasOffline, mockEnabled]);
+    
+    // Limpeza do efeito
+    return () => {
+      if (hideTimerRef.current) {
+        clearTimeout(hideTimerRef.current);
+        hideTimerRef.current = null;
+      }
+    };
+  }, [apiOnline, mensagemErro, wasOffline, mockEnabled, bannerState]);
 
-  // Não renderizar nada se o banner não deve ser mostrado
-  if (!bannerState.show) {
-    return null;
-  }
-
-  // Classes CSS com base no tipo de banner
+  // Memo para classes CSS com base no tipo de banner
   const bannerClass = `api-status-banner ${
     bannerState.type === 'error' 
       ? 'api-status-error' 
@@ -82,6 +102,11 @@ const APIStatusBanner: React.FC = () => {
         ? 'api-status-success'
         : 'api-status-warning'
   }`;
+
+  // Não renderizar nada se o banner não deve ser mostrado
+  if (!bannerState.show) {
+    return null;
+  }
 
   return (
     <div className={bannerClass}>

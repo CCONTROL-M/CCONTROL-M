@@ -19,6 +19,7 @@ from app.routers import (
     contas_receber,
     logs_sistema,
     auditoria,
+    dashboard,
 )
 
 from app.routers.auth import router as auth_router
@@ -40,6 +41,7 @@ from app.routers.contas_pagar import router as contas_pagar_router
 from app.routers.contas_receber import router as contas_receber_router
 from app.routers.permissoes import router as permissoes_router
 from app.routers.auditoria import router as auditoria_router
+from app.routers.dashboard import router as dashboard_router
 
 # Router principal que agrega todas as rotas da API
 api_router = APIRouter()
@@ -64,5 +66,6 @@ api_router.include_router(contas_pagar_router, prefix="/contas-pagar", tags=["Co
 api_router.include_router(contas_receber_router, prefix="/contas-receber", tags=["Contas a Receber"])
 api_router.include_router(permissoes_router, prefix="/permissoes", tags=["Permissões"])
 api_router.include_router(auditoria_router, prefix="/auditoria", tags=["Auditoria"])
+api_router.include_router(dashboard_router, tags=["Dashboard"])
 
 # Exportar o router para uso em main.py 

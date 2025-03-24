@@ -76,6 +76,10 @@ class Empresa(Base, TimestampedModel):
         back_populates="empresa", 
         cascade="all, delete-orphan"
     )
+    compras: Mapped[List["Compra"]] = relationship(
+        back_populates="empresa", 
+        cascade="all, delete-orphan"
+    )
     auditoria_logs: Mapped[List["Auditoria"]] = relationship(
         back_populates="empresa", 
         cascade="all, delete-orphan"

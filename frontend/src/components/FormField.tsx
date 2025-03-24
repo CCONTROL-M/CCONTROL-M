@@ -1,6 +1,6 @@
 import React, { ChangeEvent } from 'react';
 
-interface FormFieldProps {
+export interface FormFieldProps {
   label: string;
   name: string;
   type?: string;
@@ -9,6 +9,10 @@ interface FormFieldProps {
   error?: string;
   placeholder?: string;
   required?: boolean;
+  step?: string;
+  helperText?: string;
+  disabled?: boolean;
+  min?: number;
 }
 
 const FormField: React.FC<FormFieldProps> = ({
@@ -20,20 +24,28 @@ const FormField: React.FC<FormFieldProps> = ({
   error,
   placeholder = '',
   required = false,
+  step,
+  helperText,
+  disabled = false,
+  min,
 }) => {
   return (
     <div className="form-field">
       <label htmlFor={name}>{label}{required && <span className="required">*</span>}</label>
       <input
+        type={type}
         id={name}
         name={name}
-        type={type}
         value={value}
         onChange={onChange}
         placeholder={placeholder}
         required={required}
         className={error ? 'input-error' : ''}
+        step={step}
+        disabled={disabled}
+        min={min}
       />
+      {helperText && <div className="helper-text">{helperText}</div>}
       {error && <div className="form-field-error">{error}</div>}
     </div>
   );

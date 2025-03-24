@@ -4,7 +4,7 @@ import LoadingOverlay from './LoadingOverlay';
 export interface TableColumn {
   header: string;
   accessor: string;
-  render?: (item: any) => React.ReactNode;
+  render?: (item: any, index?: number) => React.ReactNode;
 }
 
 interface TableProps {
@@ -12,6 +12,7 @@ interface TableProps {
   data: any[];
   emptyMessage?: string;
   loading?: boolean;
+  onRowClick?: (item: any) => void;
 }
 
 /**
@@ -21,23 +22,19 @@ interface TableProps {
  * @param data - Array de dados a serem exibidos na tabela
  * @param emptyMessage - Mensagem a ser exibida quando não houver dados
  * @param loading - Indica se os dados estão carregando
+ * @param onRowClick - Função opcional para lidar com cliques em linhas da tabela
  */
 const Table: React.FC<TableProps> = ({
   columns,
   data,
   emptyMessage = "Nenhum item encontrado.",
-  loading = false
+  loading = false,
+  onRowClick
 }) => {
-  // Renderiza o valor da célula com base no accessor e função render opcional
-  const renderCell = (item: any, column: TableColumn) => {
-    // Se a coluna tiver uma função render, usa ela
-    if (column.render) {
-      return column.render(item);
-    }
-    
-    // Extrai o valor usando o accessor
+  // Função para extrair valor com base no accessor
+  const getValue = (item: any, accessor: string) => {
     // Suporta acessos aninhados como "usuario.nome"
-    const accessorParts = column.accessor.split('.');
+    const accessorParts = accessor.split('.');
     let value = item;
     
     for (const part of accessorParts) {
@@ -66,15 +63,29 @@ const Table: React.FC<TableProps> = ({
           </tr>
         </thead>
         <tbody>
-          {data.map((item, rowIndex) => (
-            <tr key={rowIndex}>
-              {columns.map((column, colIndex) => (
-                <td key={`${rowIndex}-${colIndex}`}>
-                  {renderCell(item, column)}
-                </td>
-              ))}
+          {data.length > 0 ? (
+            data.map((item, rowIndex) => (
+              <tr 
+                key={rowIndex} 
+                onClick={() => onRowClick && onRowClick(item)}
+                className={onRowClick ? 'clickable-row' : ''}
+              >
+                {columns.map((column, colIndex) => (
+                  <td key={`${rowIndex}-${colIndex}`}>
+                    {column.render 
+                      ? column.render(item, rowIndex) 
+                      : getValue(item, column.accessor)}
+                  </td>
+                ))}
+              </tr>
+            ))
+          ) : (
+            <tr>
+              <td colSpan={columns.length} className="empty-message">
+                {emptyMessage}
+              </td>
             </tr>
-          ))}
+          )}
         </tbody>
       </table>
     </div>
