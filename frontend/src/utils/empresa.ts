@@ -1,15 +1,11 @@
 import { getEmpresaId } from "./auth";
 
-// ID de empresa de teste para ambiente de desenvolvimento
-const EMPRESA_TESTE_ID = "11111111-1111-1111-1111-111111111111";
-
 /**
  * Obtém o ID da empresa atual para ser usado em requisições à API.
- * 
- * Em ambiente de desenvolvimento, se não houver ID no token, retorna um ID de teste.
- * Em produção, se não houver ID no token, lança um erro.
+ * Lança um erro se não houver ID no token.
  * 
  * @returns ID da empresa atual
+ * @throws Error quando o ID da empresa não está disponível
  */
 export function getEmpresa(): string {
   // Tenta obter do token
@@ -20,14 +16,9 @@ export function getEmpresa(): string {
     return empresaId;
   }
   
-  // Verifica se estamos em ambiente de desenvolvimento
-  if (import.meta.env.DEV) {
-    console.warn('ID da empresa não disponível no token. Usando ID de teste para ambiente de desenvolvimento.');
-    return EMPRESA_TESTE_ID;
-  }
-  
-  // Em produção, lança erro
-  throw new Error("ID da empresa não disponível. Faça login novamente.");
+  // Lançar erro em vez de usar ID fixo
+  console.error('ID da empresa não disponível no token');
+  throw new Error('ID da empresa não disponível. É necessário estar autenticado.');
 }
 
 /**

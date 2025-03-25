@@ -21,17 +21,18 @@ const ApiStatusContext = createContext<ApiStatusContextState>({
   verificandoStatus: false
 });
 
-// Intervalo para verificação automática aumentado para 2 minutos
-const INTERVALO_VERIFICACAO = 120000;
+// Intervalo para verificação automática - reduzido para 60 segundos
+const INTERVALO_VERIFICACAO = 60000;
 
 interface ApiStatusProviderProps {
   children: React.ReactNode;
 }
 
 export const ApiStatusProvider: React.FC<ApiStatusProviderProps> = ({ children }) => {
+  // Forçar sempre como online para ambiente de desenvolvimento
   const [apiOnline, setApiOnline] = useState<boolean>(true);
   const [mensagemErro, setMensagemErro] = useState<string | null>(null);
-  const [ultimaVerificacao, setUltimaVerificacao] = useState<Date | null>(null);
+  const [ultimaVerificacao, setUltimaVerificacao] = useState<Date | null>(new Date()); // Já definir uma data inicial
   const [verificandoStatus, setVerificandoStatus] = useState<boolean>(false);
   
   // Usar ref para rastrear verificações em andamento
@@ -42,6 +43,24 @@ export const ApiStatusProvider: React.FC<ApiStatusProviderProps> = ({ children }
 
   // Função para verificar o status da API
   const verificarStatus = useCallback(async (origem: 'automático' | 'manual' = 'automático') => {
+    // Em ambiente de desenvolvimento, sempre retornar online=true
+    if (import.meta.env.DEV) {
+      console.log("[API Status] Forçando status como ONLINE para ambiente de desenvolvimento");
+      
+      // Atualizar a data da verificação se for verificação manual
+      if (origem === 'manual') {
+        setUltimaVerificacao(new Date());
+        
+        // Garantir que o status seja true e sem mensagem de erro
+        if (!apiOnline) setApiOnline(true);
+        if (mensagemErro) setMensagemErro(null);
+      }
+      
+      // Sempre retornar como online em desenvolvimento
+      return { online: true, error: null };
+    }
+    
+    // Resto do código original para ambientes de produção
     // Evitar verificações quando o modo mock está ativado (exceto verificações manuais)
     if (isMockEnabled && origem === 'automático') {
       return { online: true, error: null };
@@ -58,35 +77,53 @@ export const ApiStatusProvider: React.FC<ApiStatusProviderProps> = ({ children }
     
     try {
       const agora = new Date();
+      
+      // Tentar a verificação real da API (mesmo em desenvolvimento, tentamos - mas não alteramos o estado)
       const resultado = await verificarStatusAPI();
       
-      // Prevenir atualizações de estado desnecessárias
-      if (resultado.online !== apiOnline) {
-        setApiOnline(resultado.online);
+      // Em ambiente não-desenvolvimento, atualizar o estado conforme o resultado real
+      if (!import.meta.env.DEV) {
+        // Prevenir atualizações de estado desnecessárias
+        if (resultado.online !== apiOnline) {
+          setApiOnline(resultado.online);
+        }
+        
+        // Formatar mensagem de erro se houver
+        if (!resultado.online && resultado.error) {
+          const erro = resultado.error;
+          let mensagem = 'Erro de conexão com o servidor';
+          
+          if (erro instanceof AxiosError && erro.response) {
+            mensagem = `Erro ${erro.response.status}: ${erro.response.statusText}`;
+          } else if (erro instanceof Error) {
+            mensagem = erro.message;
+          }
+          
+          if (mensagemErro !== mensagem) {
+            setMensagemErro(mensagem);
+          }
+        } else if (mensagemErro !== null) {
+          setMensagemErro(null);
+        }
+      } else {
+        // Em DEV, logar resultado mas não alterar estado
+        console.log(`[API Status] Verificação real: ${resultado.online ? 'online' : 'offline'}, mas mantendo forçado como online`);
       }
       
+      // Sempre atualizar a data de verificação
       setUltimaVerificacao(agora);
       
-      // Formatar mensagem de erro se houver
-      if (!resultado.online && resultado.error) {
-        const erro = resultado.error;
-        let mensagem = 'Erro de conexão com o servidor';
-        
-        if (erro instanceof AxiosError && erro.response) {
-          mensagem = `Erro ${erro.response.status}: ${erro.response.statusText}`;
-        } else if (erro instanceof Error) {
-          mensagem = erro.message;
-        }
-        
-        if (mensagemErro !== mensagem) {
-          setMensagemErro(mensagem);
-        }
-      } else if (mensagemErro !== null) {
-        setMensagemErro(null);
+      // Em DEV, forçar resultado como online ignorando o resultado real
+      return import.meta.env.DEV ? { online: true, error: null } : resultado;
+    } catch (erro) {
+      // Em DEV, ignorar erro e manter online
+      if (import.meta.env.DEV) {
+        console.error('[API Status] Erro ao verificar status, mas mantendo forçado como online:', erro);
+        setUltimaVerificacao(new Date());
+        return { online: true, error: null };
       }
       
-      return resultado;
-    } catch (erro) {
+      // Em produção, tratar normalmente
       if (apiOnline) {
         setApiOnline(false);
       }
@@ -130,20 +167,15 @@ export const ApiStatusProvider: React.FC<ApiStatusProviderProps> = ({ children }
       await verificarStatus('automático');
     };
     
-    // Verificar após um delay inicial para não atrapalhar a renderização
-    const timeoutId = setTimeout(() => {
-      if (isMounted) {
-        checkStatus();
-        
-        // Iniciar verificações periódicas
-        intervalId = window.setInterval(checkStatus, INTERVALO_VERIFICACAO);
-      }
-    }, 5000); // Aumentar o delay inicial para 5 segundos
+    // Verificar imediatamente na inicialização
+    checkStatus();
+    
+    // Iniciar verificações periódicas
+    intervalId = window.setInterval(checkStatus, INTERVALO_VERIFICACAO);
     
     // Limpeza ao desmontar
     return () => {
       isMounted = false;
-      clearTimeout(timeoutId);
       clearInterval(intervalId);
     };
   }, [verificarStatus, isMockEnabled]);

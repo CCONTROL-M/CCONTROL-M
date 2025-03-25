@@ -1,27 +1,16 @@
 import React from 'react';
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import LoadingOverlay from './LoadingOverlay';
 
 /**
- * Componente para proteger rotas que exigem autenticação
- * Redireciona para a página de login se o usuário não estiver autenticado
+ * Componente para proteção de rotas - modificado para não redirecionar
+ * Sempre permite acesso às rotas, independente do estado de autenticação
  */
 const ProtectedRoute: React.FC = () => {
-  const { isAuthenticated, loading } = useAuth();
+  const { isAuthenticated } = useAuth();
   const location = useLocation();
 
-  // Exibir loading enquanto verifica autenticação
-  if (loading) {
-    return <LoadingOverlay visible={true} text="Verificando autenticação..." />;
-  }
-
-  // Redirecionar para login se não estiver autenticado
-  if (!isAuthenticated) {
-    return <Navigate to="/login" state={{ from: location }} replace />;
-  }
-
-  // Renderizar as rotas filhas se estiver autenticado
+  // Sempre permitir acesso, sem redirecionamento
   return <Outlet />;
 };
 

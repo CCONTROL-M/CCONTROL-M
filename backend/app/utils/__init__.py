@@ -13,8 +13,9 @@ from .error_responses import (
     resource_already_exists,
     ErrorDetail
 )
+from .verificacoes import verificar_permissao_empresa
 
 # Lista de funções exportadas
 __all__ = ["verify_password", "get_password_hash", "generate_random_string", "is_valid_cpf", "is_valid_cnpj",
           "create_error_response", "create_http_exception", "resource_not_found", "validation_error",
-          "insufficient_permissions", "resource_already_exists", "ErrorDetail"] 
+          "insufficient_permissions", "resource_already_exists", "ErrorDetail", "verificar_permissao_empresa"] 

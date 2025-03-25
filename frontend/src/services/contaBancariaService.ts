@@ -25,7 +25,8 @@ export async function listarContasBancarias(id_empresa: string = '1'): Promise<C
   try {
     console.log(`Buscando contas bancárias para empresa ID: ${id_empresa}`);
     const response = await api.get("/contas-bancarias", {
-      params: { id_empresa }
+      params: { id_empresa },
+      timeout: 5000 // Timeout específico para esta rota
     });
     return response.data.items;
   } catch (error) {
@@ -44,7 +45,8 @@ export async function buscarContaBancaria(id: string, id_empresa: string = '1'):
   
   try {
     const response = await api.get(`/contas-bancarias/${id}`, {
-      params: { id_empresa }
+      params: { id_empresa },
+      timeout: 5000 // Timeout específico para esta rota
     });
     return response.data;
   } catch (error) {
@@ -81,7 +83,8 @@ export async function atualizarContaBancaria(id: string, conta: Partial<ContaBan
   
   try {
     const response = await api.put(`/contas-bancarias/${id}`, conta, {
-      params: { id_empresa }
+      params: { id_empresa },
+      timeout: 5000 // Timeout específico para esta rota
     });
     return response.data;
   } catch (error) {
@@ -99,7 +102,8 @@ export async function removerContaBancaria(id: string, id_empresa: string = '1')
   
   try {
     await api.delete(`/contas-bancarias/${id}`, {
-      params: { id_empresa }
+      params: { id_empresa },
+      timeout: 5000 // Timeout específico para esta rota
     });
   } catch (error) {
     console.error(`Erro ao remover conta bancária ID ${id}:`, error);

@@ -7,6 +7,7 @@ import { ToastProvider } from './hooks/useToast'
 import { ApiStatusProvider } from './contexts/ApiStatusContext'
 import { adicionarIndicadorMock } from './utils/mock'
 import MockIndicator from './components/MockIndicator'
+import { useInitializeToast } from './utils/toast'
 
 // Filtro personalizado de console para reduzir logs de erro de rede
 const originalConsoleError = console.error;
@@ -69,8 +70,19 @@ console.error = function(...args) {
 // @ts-ignore
 window.ROUTER_WARNINGS_DISABLED = true;
 
-// Adicionar indicador visual de mock quando ativado
-adicionarIndicadorMock();
+// Configuração para logs de desenvolvimento
+if (import.meta.env.DEV) {
+  console.info('🔧 Sistema rodando em modo de desenvolvimento');
+  
+  // Adicionar indicador de modo mock
+  adicionarIndicadorMock();
+}
+
+// Component para inicialização do Toast global
+const ToastInitializer = () => {
+  useInitializeToast();
+  return null;
+};
 
 // Em desenvolvimento, remover o StrictMode para evitar duplicação de efeitos
 // que pode causar recargas desnecessárias
@@ -78,6 +90,7 @@ const AppWithProviders = () => (
   <LoadingProvider>
     <ApiStatusProvider>
       <ToastProvider>
+        <ToastInitializer />
         <MockIndicator />
         <App />
       </ToastProvider>

@@ -9,6 +9,10 @@ import { checkCurrentRoute, runDiagnostics } from '../utils/diagnostics';
 import ConfirmDialogStatus from './ConfirmDialogStatus';
 import { useApiStatus } from '../contexts/ApiStatusContext';
 
+/**
+ * Componente de layout principal que utiliza tokens visuais padronizados
+ * para manter consistência em toda a aplicação
+ */
 const Layout: React.FC = () => {
   const [routeError, setRouteError] = useState<string | null>(null);
   const [layoutError, setLayoutError] = useState<Error | null>(null);
@@ -68,12 +72,12 @@ const Layout: React.FC = () => {
   // Renderizar mensagem de erro do layout se houver
   if (layoutError) {
     return (
-      <div className="layout-error-container">
-        <h1>Erro na Aplicação</h1>
-        <p>Ocorreu um erro inesperado no layout da aplicação.</p>
-        <p>Detalhes: {layoutError.message}</p>
+      <div className="layout-error-container bg-white p-8 m-4 rounded-lg shadow-md max-w-lg mx-auto mt-20">
+        <h1 className="text-2xl font-bold text-danger mb-4">Erro na Aplicação</h1>
+        <p className="mb-2 text-gray-700">Ocorreu um erro inesperado no layout da aplicação.</p>
+        <p className="mb-4 p-3 bg-gray-100 rounded text-gray-800">Detalhes: {layoutError.message}</p>
         <button 
-          className="btn-primary" 
+          className="btn btn-primary" 
           onClick={() => {
             setLayoutError(null);
             window.location.reload();
@@ -90,16 +94,16 @@ const Layout: React.FC = () => {
       <APIStatusBanner />
       <div className={containerClass}>
         <Sidebar />
-        <div className="main-content">
+        <div className="main-content bg-gray-50">
           <Header />
-          <main className="page-container">
+          <main className="page-container p-4">
             {routeError ? (
-              <div className="route-error-message">
-                <h2>Problema ao acessar a página</h2>
-                <p>{routeError}</p>
-                <p>Verifique se a URL está correta ou se a API está disponível.</p>
+              <div className="route-error-message bg-white p-6 rounded-lg shadow-sm border border-gray-200">
+                <h2 className="text-xl font-semibold text-danger mb-3">Problema ao acessar a página</h2>
+                <p className="mb-2 text-gray-700">{routeError}</p>
+                <p className="mb-4 text-gray-600">Verifique se a URL está correta ou se a API está disponível.</p>
                 <button 
-                  className="btn-primary" 
+                  className="btn btn-primary" 
                   onClick={() => navigate('/')}
                 >
                   Voltar para o Dashboard
@@ -107,7 +111,7 @@ const Layout: React.FC = () => {
               </div>
             ) : (
               // Envolver o Outlet em um ErrorBoundary para evitar que erros no conteúdo quebrem o layout
-              <React.Suspense fallback={<div>Carregando...</div>}>
+              <React.Suspense fallback={<div className="data-state-loading">Carregando...</div>}>
                 <ErrorBoundary>
                   <Outlet />
                 </ErrorBoundary>
@@ -140,14 +144,16 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
   render() {
     if (this.state.hasError) {
       return (
-        <div className="error-boundary-message">
-          <h3>Erro no Carregamento da Página</h3>
-          <p>Ocorreu um erro ao carregar esta página.</p>
+        <div className="error-boundary-message bg-white p-6 rounded-lg shadow-sm border border-gray-200 m-4">
+          <h3 className="text-xl font-semibold text-danger mb-3">Erro no Carregamento da Página</h3>
+          <p className="mb-2 text-gray-700">Ocorreu um erro ao carregar esta página.</p>
           {this.state.error && (
-            <p className="error-details">Detalhes: {this.state.error.message}</p>
+            <p className="error-details mb-4 p-3 bg-gray-100 rounded text-gray-800">
+              Detalhes: {this.state.error.message}
+            </p>
           )}
           <button 
-            className="btn-primary" 
+            className="btn btn-primary" 
             onClick={() => this.setState({ hasError: false, error: null })}
           >
             Tentar Novamente

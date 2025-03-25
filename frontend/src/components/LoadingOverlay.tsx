@@ -9,6 +9,7 @@ interface LoadingOverlayProps {
 
 /**
  * Overlay de carregamento para toda a aplicação
+ * Estilizado com os tokens visuais padronizados
  * 
  * @param visible Determina se o overlay está visível
  * @param text Texto a ser exibido (padrão: "Carregando...")
@@ -18,8 +19,8 @@ interface LoadingOverlayProps {
 const LoadingOverlay: React.FC<LoadingOverlayProps> = ({ 
   visible, 
   text = "Carregando...", 
-  theme = 'dark',
-  blur = false // Nunca usar blur por padrão para melhorar desempenho
+  theme = 'light',
+  blur = false
 }) => {
   const [show, setShow] = useState(visible);
   const [isExiting, setIsExiting] = useState(false);
@@ -32,7 +33,6 @@ const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
     } else {
       setIsExiting(true);
       // Aguardar a animação terminar antes de remover o componente do DOM
-      // Reduzido para 150ms para ser mais rápido
       timer = window.setTimeout(() => {
         setShow(false);
       }, 150);
@@ -53,7 +53,6 @@ const LoadingOverlay: React.FC<LoadingOverlayProps> = ({
     theme === 'light' ? 'loading-overlay--light' : 'loading-overlay--dark',
     blur ? 'loading-overlay--blur' : '',
     isExiting ? 'loading-overlay--exiting' : 'loading-overlay--entering',
-    'loading-overlay--transparent' // Tornar o overlay mais transparente para ser menos intrusivo
   ].filter(Boolean).join(' ');
 
   return (

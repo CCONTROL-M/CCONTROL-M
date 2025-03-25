@@ -1,7 +1,7 @@
 import api from "./api";
-import { Inadimplente, FluxoItem, DREData, Ciclo } from "../types";
-import { useMock } from "../utils/mock";
 import { safeArray, safeObject } from "../utils/dataUtils";
+import { Inadimplente, Ciclo, FluxoItem, DREData } from "../types";
+import { useMock } from "../utils/mock";
 import { 
   obterRelatorioInadimplenciaMock, 
   obterRelatorioFluxoCaixaMock, 
@@ -9,12 +9,64 @@ import {
   obterRelatorioCicloOperacionalMock 
 } from "./relatoriosServiceMock";
 
-// Valores padrão
+// Estruturas vazias para retorno em caso de erro
 const dreVazio: DREData = {
   receitas: [],
   despesas: [],
   lucro_prejuizo: 0
 };
+
+/**
+ * Obtém dados de inadimplência
+ */
+export async function buscarInadimplencia() {
+  try {
+    const response = await api.get("/relatorios/inadimplencia");
+    return safeArray<Inadimplente>(response.data);
+  } catch (error) {
+    console.error("Erro ao obter relatório de inadimplência:", error);
+    return [];
+  }
+}
+
+/**
+ * Obtém dados de fluxo de caixa
+ */
+export async function buscarFluxoCaixa() {
+  try {
+    const response = await api.get("/relatorios/fluxo-caixa");
+    return safeArray<FluxoItem>(response.data);
+  } catch (error) {
+    console.error("Erro ao obter relatório de fluxo de caixa:", error);
+    return [];
+  }
+}
+
+/**
+ * Obtém dados de DRE
+ */
+export async function buscarDRE() {
+  try {
+    const response = await api.get("/relatorios/dre");
+    return safeObject<DREData>(response.data, dreVazio);
+  } catch (error) {
+    console.error("Erro ao obter relatório de DRE:", error);
+    return dreVazio;
+  }
+}
+
+/**
+ * Obtém dados de ciclo operacional
+ */
+export async function buscarCicloOperacional() {
+  try {
+    const response = await api.get("/relatorios/ciclo-operacional");
+    return safeArray<Ciclo>(response.data);
+  } catch (error) {
+    console.error("Erro ao obter relatório de ciclo operacional:", error);
+    return [];
+  }
+}
 
 // Relatório de Inadimplência
 export async function obterRelatorioInadimplencia(): Promise<Inadimplente[]> {
@@ -25,7 +77,7 @@ export async function obterRelatorioInadimplencia(): Promise<Inadimplente[]> {
   }
   
   try {
-    const response = await api.get("/api/v1/relatorios/inadimplencia");
+    const response = await api.get("/relatorios/inadimplencia");
     return safeArray<Inadimplente>(response.data);
   } catch (error) {
     console.error("Erro ao obter relatório de inadimplência:", error);
@@ -42,7 +94,7 @@ export async function obterRelatorioFluxoCaixa(): Promise<FluxoItem[]> {
   }
   
   try {
-    const response = await api.get("/api/v1/relatorios/fluxo-caixa");
+    const response = await api.get("/relatorios/fluxo-caixa");
     return safeArray<FluxoItem>(response.data);
   } catch (error) {
     console.error("Erro ao obter relatório de fluxo de caixa:", error);
@@ -59,7 +111,7 @@ export async function obterRelatorioDRE(): Promise<DREData> {
   }
   
   try {
-    const response = await api.get("/api/v1/relatorios/dre");
+    const response = await api.get("/relatorios/dre");
     return safeObject<DREData>(response.data, dreVazio);
   } catch (error) {
     console.error("Erro ao obter relatório de DRE:", error);
@@ -76,7 +128,7 @@ export async function obterRelatorioCicloOperacional(): Promise<Ciclo[]> {
   }
   
   try {
-    const response = await api.get("/api/v1/relatorios/ciclo-operacional");
+    const response = await api.get("/relatorios/ciclo-operacional");
     return safeArray<Ciclo>(response.data);
   } catch (error) {
     console.error("Erro ao obter relatório de ciclo operacional:", error);

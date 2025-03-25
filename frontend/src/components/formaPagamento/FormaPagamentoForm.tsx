@@ -1,5 +1,8 @@
 import React, { useEffect } from 'react';
 import FormField from '../FormField';
+import Form from '../Form';
+import ButtonGroup from '../ButtonGroup';
+import Button from '../Button';
 import { FormaPagamento } from '../../types';
 import useFormHandler from '../../hooks/useFormHandler';
 
@@ -83,8 +86,33 @@ const FormaPagamentoForm: React.FC<FormaPagamentoFormProps> = ({
     }
   };
 
+  const actions = (
+    <ButtonGroup orientation="responsive" alignment="end" spacing="md">
+      <Button 
+        variant="secondary" 
+        type="button"
+        onClick={onCancel}
+      >
+        Cancelar
+      </Button>
+      <Button
+        variant="primary"
+        type="submit"
+        loading={isLoading}
+      >
+        {isLoading ? 'Salvando...' : 'Salvar'}
+      </Button>
+    </ButtonGroup>
+  );
+
   return (
-    <form onSubmit={handleSubmit} className="form-container py-0">
+    <Form 
+      onSubmit={handleSubmit} 
+      layout="column" 
+      gap="md" 
+      actions={actions}
+      actionPosition="end"
+    >
       <FormField
         label="Tipo"
         name="tipo"
@@ -93,45 +121,33 @@ const FormaPagamentoForm: React.FC<FormaPagamentoFormProps> = ({
         error={formErrors.tipo}
         placeholder="Ex: Cartão, Boleto, Pix"
         required
+        width="full"
       />
       
-      <FormField
-        label="Taxa"
-        name="taxas"
-        value={formData.taxas}
-        onChange={handleInputChange}
-        error={formErrors.taxas}
-        placeholder="Ex: 2.5%, Isento"
-        required
-      />
-      
-      <FormField
-        label="Prazo (dias)"
-        name="prazo"
-        value={formData.prazo}
-        onChange={handleInputChange}
-        error={formErrors.prazo}
-        placeholder="Ex: 30 dias, À vista"
-        required
-      />
-      
-      <div className="form-actions">
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={onCancel}
-        >
-          Cancelar
-        </button>
-        <button
-          type="submit"
-          className="btn-primary"
-          disabled={isLoading}
-        >
-          {isLoading ? 'Salvando...' : 'Salvar'}
-        </button>
+      <div className="form-row gap-md">
+        <FormField
+          label="Taxa"
+          name="taxas"
+          value={formData.taxas}
+          onChange={handleInputChange}
+          error={formErrors.taxas}
+          placeholder="Ex: 2.5%, Isento"
+          required
+          width="half"
+        />
+        
+        <FormField
+          label="Prazo (dias)"
+          name="prazo"
+          value={formData.prazo}
+          onChange={handleInputChange}
+          error={formErrors.prazo}
+          placeholder="Ex: 30 dias, À vista"
+          required
+          width="half"
+        />
       </div>
-    </form>
+    </Form>
   );
 };
 

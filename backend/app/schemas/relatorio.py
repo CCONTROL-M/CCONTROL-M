@@ -8,6 +8,7 @@ e análises utilizadas pelos serviços relacionados a contas a pagar e a receber
 from datetime import date, datetime
 from typing import Dict, List, Optional, Any, Union
 from pydantic import BaseModel, Field
+from uuid import UUID
 
 
 class RelatorioContasPagar(BaseModel):
@@ -89,4 +90,57 @@ class FluxoCaixa(BaseModel):
     total_saidas: float = Field(..., description="Total de saídas no período")
     resultado_periodo: float = Field(..., description="Resultado líquido do período")
     detalhamento_diario: List[Dict[str, Union[date, float, int]]] = Field(..., description="Detalhamento diário")
-    data_geracao: datetime = Field(..., description="Data e hora de geração do relatório") 
+    data_geracao: datetime = Field(..., description="Data e hora de geração do relatório")
+
+
+class CategoriaValor(BaseModel):
+    """Representa uma categoria e seu valor associado."""
+    categoria: str
+    valor: float
+
+
+class RelatorioInadimplencia(BaseModel):
+    """Schema para relatório de inadimplência."""
+    cliente: str
+    documento: str
+    contato: str
+    valor_total: float
+    dias_atraso: int
+    parcelas_atrasadas: int
+
+
+class RelatorioFluxoCaixa(BaseModel):
+    """Schema para relatório de fluxo de caixa."""
+    data: str  # Formato YYYY-MM-DD
+    entradas: float
+    saidas: float
+    saldo_dia: float
+    saldo_acumulado: float
+
+
+class FluxoGrupo(BaseModel):
+    """Grupo de itens de fluxo de caixa."""
+    data: str
+    entradas: float
+    saidas: float
+    saldo_dia: float
+    saldo_acumulado: float
+    detalhes: Optional[List[RelatorioFluxoCaixa]] = []
+
+
+class RelatorioDRE(BaseModel):
+    """Schema para relatório DRE."""
+    receitas: List[CategoriaValor]
+    despesas: List[CategoriaValor]
+    lucro_prejuizo: float
+
+
+class RelatorioCicloOperacional(BaseModel):
+    """Schema para relatório de ciclo operacional."""
+    mes: str
+    ano: int
+    pme: int  # Prazo médio de estocagem
+    pmr: int  # Prazo médio de recebimento
+    pmp: int  # Prazo médio de pagamento
+    ciclo_operacional: int  # PME + PMR
+    ciclo_financeiro: int  # Ciclo operacional - PMP 

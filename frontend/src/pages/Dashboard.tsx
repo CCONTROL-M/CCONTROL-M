@@ -1,80 +1,40 @@
-import React, { useEffect, useState } from "react";
-import { ResumoDashboard } from "../types";
+import React, { useState } from "react";
 import { formatarMoeda } from "../utils/formatters";
-import { buscarResumoDashboard } from "../services/relatorioService";
-import { useMock } from '../utils/mock';
 import { useAuth } from '../contexts/AuthContext';
-import { verificarStatusAPI } from "../services/api";
 import DataStateHandler from "../components/DataStateHandler";
-
-// Estado inicial para o resumo
-const resumoInicial: ResumoDashboard = {
-  caixa_atual: 0,
-  total_receber: 0,
-  total_pagar: 0,
-  recebimentos_hoje: 0,
-  pagamentos_hoje: 0
-};
+import { useDashboardData } from "../hooks/useDashboardData";
+import { listarEmpresas, EmpresaCompleta } from "../services/empresaService";
 
 export default function Dashboard() {
-  const [resumo, setResumo] = useState<ResumoDashboard>(resumoInicial);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState<boolean>(false);
-  const [apiOffline, setApiOffline] = useState<boolean>(false);
+  const [selectedEmpresa, setSelectedEmpresa] = useState<string | undefined>(undefined);
+  const [empresas, setEmpresas] = useState<EmpresaCompleta[]>([]);
+  const [carregandoEmpresas, setCarregandoEmpresas] = useState<boolean>(false);
   const { user } = useAuth();
-
-  useEffect(() => {
-    verificarApi();
-    fetchData();
-  }, []);
-
-  const verificarApi = async () => {
-    const { online } = await verificarStatusAPI();
-    setApiOffline(!online);
+  
+  // Usar o hook personalizado para dashboard
+  const { resumo, loading, error, fetchData, empresaId } = useDashboardData(selectedEmpresa);
+  
+  // Função para buscar empresas para o seletor
+  const buscarEmpresas = async () => {
+    if (carregandoEmpresas) return;
     
-    // Não ativamos mais o modo mock automaticamente
-    // Apenas registramos o status da API
-    if (!online) {
-      console.warn("API offline no dashboard, continuando com modo atual");
-    }
-  };
-
-  const fetchData = async () => {
     try {
-      setLoading(true);
-      setError(null);
-      
-      // Verificar status da API antes de tentar buscar dados
-      await verificarApi();
-      
-      // Não ativamos mais o modo mock automaticamente
-      // Se a API estiver offline, os componentes de tratamento de erro lidarão com isso
-      
-      const data = await buscarResumoDashboard();
-      
-      // Verifica se os dados recebidos são válidos
-      if (data) {
-        setResumo({
-          caixa_atual: data.caixa_atual || 0,
-          total_receber: data.total_receber || 0,
-          total_pagar: data.total_pagar || 0,
-          recebimentos_hoje: data.recebimentos_hoje || 0,
-          pagamentos_hoje: data.pagamentos_hoje || 0
-        });
-      } else {
-        throw new Error('Dados inválidos recebidos do servidor');
-      }
+      setCarregandoEmpresas(true);
+      const data = await listarEmpresas();
+      setEmpresas(data);
     } catch (err) {
-      console.error('Erro ao carregar os indicadores financeiros:', err);
-      setError('Não foi possível carregar os indicadores financeiros. Tente novamente mais tarde.');
-      
-      // Não tentamos mais ativar o mock automaticamente em caso de erro
-      // O usuário precisa ativar manualmente se quiser
+      console.error("Erro ao buscar empresas:", err);
     } finally {
-      setLoading(false);
+      setCarregandoEmpresas(false);
     }
   };
-
+  
+  // Alternar empresa selecionada
+  const handleChangeEmpresa = (event: React.ChangeEvent<HTMLSelectElement>) => {
+    const novaEmpresa = event.target.value;
+    setSelectedEmpresa(novaEmpresa === "default" ? undefined : novaEmpresa);
+  };
+  
   // Calcular valores derivados com segurança
   const saldoLiquido = (resumo?.caixa_atual || 0) + (resumo?.total_receber || 0) - (resumo?.total_pagar || 0);
   const fluxoDiario = (resumo?.recebimentos_hoje || 0) - (resumo?.pagamentos_hoje || 0);
@@ -82,14 +42,40 @@ export default function Dashboard() {
   return (
     <div>
       <div className="page-header-container">
-        <h1 className="page-title">Dashboard Financeiro</h1>
-        <p className="text-gray-600">Bem-vindo, {user?.nome || 'Usuário'}</p>
+        <div className="flex flex-row items-center justify-between">
+          <div>
+            <h1 className="page-title">Dashboard Financeiro</h1>
+            <p className="text-gray-600">Bem-vindo, {user?.nome || 'Usuário'}</p>
+          </div>
+          
+          <div className="flex items-center">
+            <button
+              onClick={buscarEmpresas}
+              className="btn-secondary mr-2"
+              disabled={carregandoEmpresas}
+            >
+              {carregandoEmpresas ? 'Carregando...' : 'Carregar Empresas'}
+            </button>
+            
+            <select
+              className="form-select min-w-[220px]"
+              onChange={handleChangeEmpresa}
+              value={selectedEmpresa || "default"}
+              disabled={carregandoEmpresas || empresas.length === 0}
+            >
+              <option value="default">Selecione uma empresa</option>
+              {empresas.map(empresa => (
+                <option key={empresa.id_empresa} value={empresa.id_empresa}>
+                  {empresa.nome || empresa.razao_social}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
         
-        {apiOffline && (
-          <div className="mt-2 p-2 bg-yellow-100 border border-yellow-300 rounded text-sm">
-            <p className="text-yellow-700">
-              <span className="font-bold">Modo de demonstração:</span> Servidor não disponível, exibindo dados simulados
-            </p>
+        {empresaId && (
+          <div className="mt-2 text-sm text-gray-500">
+            Exibindo dados da empresa ID: {empresaId}
           </div>
         )}
       </div>

@@ -111,4 +111,43 @@ def paginate_list(
         "page": page,
         "page_size": page_size,
         "pages": pages
+    }
+
+
+def paginate(items: List[Any], total: int, page: int, page_size: int) -> dict:
+    """
+    Cria uma resposta paginada a partir de uma lista de itens.
+    
+    Args:
+        items: Lista de itens para paginar
+        total: Total de itens (sem paginação)
+        page: Página atual (começando de 1)
+        page_size: Tamanho da página
+    
+    Returns:
+        Dicionário com os itens paginados e metadados
+    """
+    # Cálculo do total de páginas
+    pages = (total + page_size - 1) // page_size if total > 0 else 1
+    
+    # Ajuste da página atual se estiver fora dos limites
+    page = max(1, min(page, pages))
+    
+    # Cálculo dos índices iniciais e finais para a página atual
+    start_idx = (page - 1) * page_size
+    end_idx = min(start_idx + page_size, total)
+    
+    # Se estamos usando slice direto
+    if len(items) > end_idx:
+        page_items = items[start_idx:end_idx]
+    else:
+        # Se os itens já vieram paginados do banco de dados
+        page_items = items
+    
+    return {
+        "items": page_items,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "pages": pages
     } 

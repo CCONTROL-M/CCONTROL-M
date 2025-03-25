@@ -1,6 +1,7 @@
 import api from "./api";
 import { CentroCusto } from "../types";
 import { useMock } from "../utils/mock";
+import { getEmpresa } from "../utils/auth";
 
 // Como não encontramos um arquivo de mock para este serviço, vamos criar dados mock simples aqui
 const centrosCustoMock: CentroCusto[] = [
@@ -42,7 +43,7 @@ export async function listarCentrosCusto(): Promise<CentroCusto[]> {
     return listarCentrosCustoMock();
   }
   
-  const response = await api.get("/api/v1/centros-custo");
+  const response = await api.get("/centros-custo");
   return response.data.items || response.data;
 }
 
@@ -52,7 +53,7 @@ export async function buscarCentroCusto(id: string): Promise<CentroCusto> {
     return buscarCentroCustoMock(id);
   }
   
-  const response = await api.get(`/api/v1/centros-custo/${id}`);
+  const response = await api.get(`/centros-custo/${id}`);
   return response.data;
 }
 
@@ -67,7 +68,14 @@ export async function cadastrarCentroCusto(centroCusto: Omit<CentroCusto, "id_ce
     return novoCentro;
   }
   
-  const response = await api.post("/api/v1/centros-custo", centroCusto);
+  const id_empresa = getEmpresa();
+  
+  const centroCustoData = {
+    ...centroCusto,
+    id_empresa
+  };
+  
+  const response = await api.post("/centros-custo", centroCustoData);
   return response.data;
 }
 
@@ -80,7 +88,7 @@ export async function atualizarCentroCusto(id: string, centroCusto: Partial<Cent
     return centrosCustoMock[index];
   }
   
-  const response = await api.put(`/api/v1/centros-custo/${id}`, centroCusto);
+  const response = await api.put(`/centros-custo/${id}`, centroCusto);
   return response.data;
 }
 
@@ -93,5 +101,5 @@ export async function removerCentroCusto(id: string): Promise<void> {
     return;
   }
   
-  await api.delete(`/api/v1/centros-custo/${id}`);
+  await api.delete(`/centros-custo/${id}`);
 } 

@@ -202,6 +202,118 @@ CCONTROL-M/
 └── docs/         # Documentação do projeto
 ```
 
+## Execução em Ambiente Docker (Produção Local)
+
+> **⚠️ IMPORTANTE**: Para utilizar o ambiente Docker, é necessário instalar o [Docker Desktop](https://www.docker.com/products/docker-desktop/) em seu sistema. Se o Docker não estiver instalado, você poderá seguir as instruções de instalação no site oficial ou usar o método de desenvolvimento local descrito anteriormente.
+
+### Passo a Passo para Executar com Docker
+
+1. **Verificação do Docker**:
+   ```powershell
+   docker --version
+   ```
+   Certifique-se que o Docker está instalado e funcionando corretamente.
+
+2. **Iniciar com Script Automatizado**:
+   ```powershell
+   .\start_prod.ps1
+   ```
+   Este script verifica requisitos, configura o ambiente e inicia os containers.
+
+3. **OU Iniciar Manualmente**:
+   ```powershell
+   # Construir e iniciar containers
+   docker-compose up -d --build
+   ```
+
+4. **Verificar Status dos Containers**:
+   ```powershell
+   docker-compose ps
+   ```
+   Todos os serviços devem estar como "running".
+
+5. **Acessar a Aplicação**:
+   - Frontend: http://localhost 
+   - API: http://localhost/api/docs
+
+6. **Encerrar o Ambiente**:
+   ```powershell
+   docker-compose down
+   ```
+
+Para simular um ambiente de produção localmente usando Docker, o CCONTROL-M disponibiliza uma configuração completa de containerização.
+
+### Arquivos de Configuração Docker
+
+O projeto inclui os seguintes arquivos para configuração Docker:
+- `docker-compose.yml` - Orquestração dos serviços frontend e backend
+- `backend/Dockerfile` - Configuração do contêiner backend (Python/FastAPI)
+- `frontend/Dockerfile` - Configuração do contêiner frontend (build com Node.js, serve com Nginx)
+- `frontend/nginx.conf` - Configuração do servidor web para o frontend
+- `.env.docker` - Variáveis de ambiente para o ambiente Docker
+
+#### Descrição Detalhada dos Componentes Docker
+
+1. **Contêiner Backend**:
+   - Baseado em Python 3.9
+   - Expõe a porta 8002
+   - Executa o FastAPI com Uvicorn
+   - Conecta-se ao banco de dados Supabase (configurado no .env.docker)
+   - Processa requisições da API REST
+
+2. **Contêiner Frontend**:
+   - Build multi-estágio: Node.js para compilação, Nginx para servir
+   - Compila a aplicação React/TypeScript para arquivos estáticos
+   - Configuração de Nginx otimizada com cache, compressão e segurança
+   - Proxy reverso para API e documentação
+   - Gerenciamento de rotas do React Router
+
+3. **Rede Docker**:
+   - Rede compartilhada `ccontrol-network` para comunicação entre serviços
+   - Configuração do contêiner frontend para acessar o backend via nome de serviço
+
+Estas configurações estão prontas para uso em um ambiente de produção local ou em servidores de homologação.
+
+### Logs e Monitoramento Docker
+
+Para visualizar os logs dos contêineres e monitorar sua execução:
+
+```powershell
+# Ver logs de todos os serviços
+docker-compose logs
+
+# Ver logs em tempo real (follow)
+docker-compose logs -f
+
+# Ver logs apenas do frontend
+docker-compose logs -f frontend
+
+# Ver logs apenas do backend
+docker-compose logs -f backend
+```
+
+#### Exemplos de Logs Comuns
+
+**Logs de inicialização bem-sucedida do Backend:**
+```
+ccontrol-m-backend  | INFO:     Started server process [1]
+ccontrol-m-backend  | INFO:     Waiting for application startup.
+ccontrol-m-backend  | INFO:     Application startup complete.
+ccontrol-m-backend  | INFO:     Uvicorn running on http://0.0.0.0:8002 (Press CTRL+C to quit)
+```
+
+**Logs de inicialização bem-sucedida do Frontend:**
+```
+ccontrol-m-frontend | /docker-entrypoint.sh: Configuration complete; ready for start up
+ccontrol-m-frontend | 2025/03/24 12:34:56 [notice] 1#1: start worker processes
+ccontrol-m-frontend | 2025/03/24 12:34:56 [notice] 1#1: start worker process 20
+```
+
+**Erros comuns e soluções:**
+- Se o backend mostrar erros de conexão com o banco de dados, verifique as variáveis em `.env.docker`
+- Se o frontend mostrar erros 502, verifique se o backend está em execução e acessível via rede Docker
+- Para problemas de permissão em volumes, execute `docker-compose down -v` e inicie novamente
+
 ## Tecnologias Utilizadas
 
 ### Frontend
@@ -418,6 +530,8 @@ O frontend possui um sistema de modo mock para funcionamento offline, permitindo
 - ✅ Transferências entre Contas
 - ✅ Logs do sistema
 - ✅ Formas de pagamento
+- ✅ Relatórios (DRE, Fluxo de Caixa, Inadimplência, Ciclo Operacional) - migrados para dados reais!
+- ✅ Dashboard - migrado para dados reais!
 - ❌ Categorias (pendente)
 - ❌ Centros de Custo (pendente)
 - ❌ Contas Bancárias (pendente)
@@ -425,6 +539,38 @@ O frontend possui um sistema de modo mock para funcionamento offline, permitindo
 - ❌ Configurações (pendente)
 
 Para mais detalhes sobre o modo mock, consulte o README específico do frontend em `frontend/src/README.md`.
+
+## Status da Migração para Dados Reais
+
+Todos os serviços principais do sistema agora estão utilizando dados reais do banco de dados PostgreSQL/Supabase, incluindo:
+
+- **Relatórios Financeiros**:
+  - ✅ DRE (Demonstrativo de Resultado do Exercício)
+  - ✅ Fluxo de Caixa
+  - ✅ Relatório de Inadimplência
+  - ✅ Ciclo Operacional
+  - ✅ Dashboard financeiro
+
+- **Endpoints de Negócio**:
+  - ✅ CRUD de Clientes
+  - ✅ CRUD de Fornecedores
+  - ✅ CRUD de Produtos
+  - ✅ CRUD de Categorias
+  - ✅ CRUD de Centros de Custo
+  - ✅ CRUD de Lançamentos
+  - ✅ CRUD de Vendas e Parcelas
+
+A Fase 6.1 foi concluída com sucesso, com todas as rotas agora consumindo dados reais, sem uso de mock, com filtros corretos e integração estável com o frontend.
+
+## URLs de Desenvolvimento e Testes
+
+As seguintes URLs são utilizadas para desenvolvimento e testes:
+
+- **Frontend:** http://localhost:3000
+- **Backend API:** http://127.0.0.1:8002/api/v1
+- **Documentação API (Swagger):** http://127.0.0.1:8002/docs
+
+> **Nota:** Certifique-se de que o arquivo `.env` do frontend está configurado com `VITE_API_URL=http://127.0.0.1:8002/api/v1` para garantir a conexão correta com a API.
 
 ## Iniciando o Ambiente de Desenvolvimento
 
@@ -524,4 +670,33 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
     }
 }
-``` 
+```
+
+## Modo Real - Dados do Banco de Dados
+
+> **IMPORTANTE**: Todas as rotas da API agora estão configuradas para usar dados reais do banco de dados Supabase, incluindo:
+> - ✅ Dashboard e indicadores financeiros
+> - ✅ Relatório DRE (Demonstrativo de Resultados)
+> - ✅ Relatório de Fluxo de Caixa
+> - ✅ Relatório de Inadimplência
+> - ✅ Relatório de Ciclo Operacional
+> - ✅ Todas as operações CRUD padrão (cadastros, atualizações, exclusões)
+
+O sistema não utiliza mais o modo mock por padrão. Todos os dados são carregados diretamente do banco de dados PostgreSQL/Supabase.
+
+### Conexão com a API
+
+O frontend está configurado para conectar com o backend na URL: `http://127.0.0.1:8002/api/v1` definida na variável de ambiente `VITE_API_URL` no arquivo `.env`.
+
+### Autenticação e ID Empresa
+
+Todas as requisições à API incluem:
+- **Bearer Token**: Obtido automaticamente do localStorage após login
+- **ID Empresa**: Extraído do token JWT ou, em desenvolvimento, usando um ID temporário de fallback
+
+### Tratamento de Erros
+
+Em caso de falha na API:
+- O sistema exibe mensagens de erro apropriadas
+- O modo mock não é ativado automaticamente
+- Os usuários são notificados do problema para tentar novamente 

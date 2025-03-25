@@ -1,126 +1,43 @@
 version: '3.8'
 
 services:
-  # Serviço do backend FastAPI
+  # Serviço do Backend
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    restart: always
+    container_name: ccontrol-m-backend
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - SECRET_KEY=${SECRET_KEY}
+      - ENVIRONMENT=production
+      - API_PREFIX=/api/v1
+      - BACKEND_CORS_ORIGINS=http://localhost,http://frontend
     volumes:
       - ./backend/logs:/app/logs
-      - ./backend/uploads:/app/uploads
-    environment:
-      - APP_ENV=production
-      - PORT=8000
+    networks:
+      - ccontrol-network
+
+  # Serviço do Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_API_URL=http://localhost:8002/api/v1
+        - VITE_MOCK_ENABLED=false
+    container_name: ccontrol-m-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
     depends_on:
-      - postgres
-    networks:
-      - ccontrol-network
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
-  # Banco de dados PostgreSQL
-  postgres:
-    image: postgres:14-alpine
-    restart: always
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./postgres/init:/docker-entrypoint-initdb.d
-    environment:
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres
-      - POSTGRES_DB=ccontrolm
-    networks:
-      - ccontrol-network
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # Serviço pgAdmin para gerenciamento do banco de dados
-  pgadmin:
-    image: dpage/pgadmin4
-    restart: always
-    ports:
-      - "5050:80"
-    environment:
-      - PGADMIN_DEFAULT_EMAIL=admin@ccontrol.com
-      - PGADMIN_DEFAULT_PASSWORD=admin
-    volumes:
-      - pgadmin_data:/var/lib/pgadmin
-    depends_on:
-      - postgres
-    networks:
-      - ccontrol-network
-
-  # Serviço de cache Redis (opcional)
-  redis:
-    image: redis:alpine
-    restart: always
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - ccontrol-network
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-
-  # Serviço Prometheus para monitoramento (opcional)
-  prometheus:
-    image: prom/prometheus
-    restart: always
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    networks:
-      - ccontrol-network
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
-      - '--web.console.templates=/usr/share/prometheus/consoles'
-
-  # Serviço Grafana para visualização de métricas (opcional)
-  grafana:
-    image: grafana/grafana
-    restart: always
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning
-    environment:
-      - GF_SECURITY_ADMIN_USER=admin
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-      - GF_USERS_ALLOW_SIGN_UP=false
-    depends_on:
-      - prometheus
+      - backend
     networks:
       - ccontrol-network
 
 networks:
   ccontrol-network:
-    driver: bridge
-
-volumes:
-  postgres_data:
-  pgadmin_data:
-  redis_data:
-  prometheus_data:
-  grafana_data: 
+    driver: bridge 

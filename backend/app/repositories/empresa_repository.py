@@ -22,7 +22,23 @@ class EmpresaRepository:
         """
         self.session = session
     
-    async def get_by_id(self, id_empresa: UUID) -> Optional[Empresa]:
+    @classmethod
+    async def get_by_id(cls, session: AsyncSession, id_empresa: UUID) -> Optional[Empresa]:
+        """
+        Obtém uma empresa pelo ID (método estático).
+        
+        Args:
+            session: Sessão do banco de dados
+            id_empresa: ID da empresa
+            
+        Returns:
+            Empresa: Empresa encontrada ou None
+        """
+        query = select(Empresa).where(Empresa.id_empresa == id_empresa)
+        result = await session.execute(query)
+        return result.scalar_one_or_none()
+    
+    async def get_by_id_instance(self, id_empresa: UUID) -> Optional[Empresa]:
         """
         Obtém uma empresa pelo ID.
         
@@ -228,7 +244,7 @@ class EmpresaRepository:
         """
         try:
             # Buscar empresa existente
-            db_obj = await self.get_by_id(id_empresa)
+            db_obj = await self.get_by_id_instance(id_empresa)
             if not db_obj:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -277,7 +293,7 @@ class EmpresaRepository:
             HTTPException: Se a empresa não for encontrada
         """
         try:
-            db_obj = await self.get_by_id(id_empresa)
+            db_obj = await self.get_by_id_instance(id_empresa)
             if not db_obj:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,

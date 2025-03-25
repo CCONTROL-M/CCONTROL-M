@@ -59,7 +59,7 @@ export async function listarEmpresas(): Promise<EmpresaCompleta[]> {
     return listarEmpresasMock();
   }
   
-  const response = await api.get("/api/v1/empresas");
+  const response = await api.get("/empresas");
   return response.data.items || response.data;
 }
 
@@ -69,7 +69,7 @@ export async function buscarEmpresa(id: string): Promise<EmpresaCompleta> {
     return buscarEmpresaMock(id);
   }
   
-  const response = await api.get(`/api/v1/empresas/${id}`);
+  const response = await api.get(`/empresas/${id}`);
   return response.data;
 }
 
@@ -85,7 +85,7 @@ export async function cadastrarEmpresa(empresa: Omit<EmpresaCompleta, "id_empres
     return {...novaEmpresa};
   }
   
-  const response = await api.post("/api/v1/empresas", empresa);
+  const response = await api.post("/empresas", empresa);
   return response.data;
 }
 
@@ -98,7 +98,7 @@ export async function atualizarEmpresa(id: string, empresa: Partial<EmpresaCompl
     return {...empresasMock[index]};
   }
   
-  const response = await api.put(`/api/v1/empresas/${id}`, empresa);
+  const response = await api.put(`/empresas/${id}`, empresa);
   return response.data;
 }
 
@@ -111,7 +111,7 @@ export async function removerEmpresa(id: string): Promise<void> {
     return;
   }
   
-  await api.delete(`/api/v1/empresas/${id}`);
+  await api.delete(`/empresas/${id}`);
 }
 
 export async function buscarEmpresaAtual(): Promise<EmpresaCompleta> {
@@ -121,7 +121,7 @@ export async function buscarEmpresaAtual(): Promise<EmpresaCompleta> {
     return {...empresasMock[0]};
   }
   
-  const response = await api.get("/api/v1/empresas/atual");
+  const response = await api.get("/empresas/atual");
   return response.data;
 }
 
@@ -133,6 +133,6 @@ export async function definirEmpresaAtual(id: string): Promise<EmpresaCompleta> 
     return {...empresa};
   }
   
-  const response = await api.post(`/api/v1/empresas/${id}/definir-atual`);
+  const response = await api.post(`/empresas/${id}/definir-atual`);
   return response.data;
 } 

@@ -386,3 +386,57 @@ TEST_MODE=integration TEST_DB_TYPE=supabase pytest -m integration
 - Execute migrações pendentes com `alembic upgrade head`
 - Verifique o estado atual das migrações com `alembic current`
 - Todas as entidades do sistema estão refletidas nas migrações 
+
+Este diretório contém a implementação do backend para o sistema CCONTROL-M de controle financeiro.
+
+## Servidor de Teste
+
+Foi implementado um servidor de teste simplificado para os endpoints de lançamentos financeiros, permitindo testes sem dependências externas como banco de dados.
+
+### Como executar o servidor de teste
+
+```bash
+# A partir do diretório backend
+python -m app.test_server
+```
+
+O servidor será executado na porta 8002 e disponibilizará os seguintes endpoints:
+
+### Endpoints Disponíveis
+
+#### Verificação de Saúde
+- **GET /health** - Verifica o status do servidor
+
+#### Lançamentos Financeiros (CRUD)
+- **GET /api/v1/lancamentos** - Lista lançamentos financeiros com filtros e paginação
+  - Parâmetros: id_empresa (obrigatório), tipo, id_categoria, id_centro_custo, id_conta, status, data_inicio, data_fim, page, page_size
+  
+- **POST /api/v1/lancamentos** - Cria um novo lançamento financeiro
+  - Corpo da requisição: descricao, valor, data_lancamento, data_pagamento (opcional), tipo, id_categoria, id_empresa, id_conta (opcional), id_centro_custo (opcional)
+
+- **GET /api/v1/lancamentos/{id_lancamento}** - Obtém detalhes de um lançamento específico
+  - Parâmetros: id_lancamento (no caminho), id_empresa (na query)
+
+- **PUT /api/v1/lancamentos/{id_lancamento}** - Atualiza um lançamento existente
+  - Parâmetros: id_lancamento (no caminho), id_empresa (na query)
+  - Corpo da requisição: campos a serem atualizados (todos opcionais)
+
+- **DELETE /api/v1/lancamentos/{id_lancamento}** - Exclui um lançamento existente
+  - Parâmetros: id_lancamento (no caminho), id_empresa (na query)
+
+### Documentação
+
+A API possui documentação Swagger completa acessível em:
+- http://127.0.0.1:8002/docs - Interface Swagger UI
+- http://127.0.0.1:8002/openapi.json - Especificação OpenAPI em formato JSON
+
+## Servidor de Produção
+
+Para o servidor de produção, utilize o módulo app.main:
+
+```bash
+# A partir do diretório raiz do projeto
+uvicorn app.main:app --reload
+```
+
+Os endpoints do servidor de produção seguem a mesma estrutura do servidor de teste, mas utilizam o banco de dados PostgreSQL configurado. 

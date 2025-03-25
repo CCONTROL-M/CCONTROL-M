@@ -12,6 +12,7 @@ from typing import Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel
 from datetime import date, datetime
+from sqlalchemy import func, and_, extract, select
 
 from app.database import get_async_session
 from app.schemas.token import TokenPayload
@@ -22,6 +23,9 @@ from app.services.conta_pagar.conta_pagar_query_service import ContaPagarQuerySe
 from app.services.parcela_service import ParcelaService
 from app.models.usuario import Usuario
 from app.models.empresa import Empresa
+from app.models.cliente import Cliente
+from app.models.fornecedor import Fornecedor
+from app.models.lancamento import Lancamento
 from app.schemas.relatorio import ResumoDashboard
 from app.utils.verificacoes import verificar_permissao_empresa
 
@@ -37,6 +41,16 @@ class ResumoDashboard(BaseModel):
     recebimentos_hoje: float = 0
     pagamentos_hoje: float = 0
 
+# Schema de resposta para o novo resumo do dashboard
+class ResumoDashboardApi(BaseModel):
+    """Schema para o resumo do dashboard financeiro da API v1."""
+    total_receitas_mes_atual: float = 0
+    total_despesas_mes_atual: float = 0
+    saldo_mensal_atual: float = 0
+    quantidade_clientes: int = 0
+    quantidade_fornecedores: int = 0
+    quantidade_lancamentos_mes: int = 0
+
 # Router
 router = APIRouter(
     prefix="/dashboard",
@@ -49,21 +63,25 @@ async def get_dashboard_resumo(
     id_empresa: UUID,
     current_user: Usuario = Depends(get_current_user),
     session: AsyncSession = Depends(get_async_session)
-):
+) -> ResumoDashboard:
     """
-    Obtém resumo financeiro para o dashboard.
+    Retorna um resumo financeiro para o dashboard.
     
-    Args:
-        id_empresa: ID da empresa
-        current_user: Usuário autenticado
-        session: Sessão do banco de dados
-        
-    Returns:
-        ResumoDashboard: Resumo financeiro para o dashboard
+    Este endpoint agrega dados como saldo atual, valores a pagar e receber,
+    bem como movimentações previstas para o dia atual.
     """
+    logger.info(f"Obtendo resumo do dashboard para empresa {id_empresa}")
+    
     try:
-        # Verificar permissão do usuário para a empresa
-        await verificar_permissao_empresa(session, id_empresa, current_user)
+        # Verificar permissão de acesso à empresa
+        await verificar_permissao_empresa(id_empresa, current_user, session)
+        
+        # Inicializar resposta
+        response = ResumoDashboard()
+        
+        # Obter saldo atual
+        saldo_contas = await ContaBancariaRepository(session).get_saldo_total(id_empresa)
+        response.caixa_atual = saldo_contas if saldo_contas else 0.0
         
         # Inicializar serviços e repositórios
         conta_bancaria_repository = ContaBancariaRepository(session)
@@ -72,9 +90,6 @@ async def get_dashboard_resumo(
         
         # Data atual
         hoje = date.today()
-        
-        # Obter saldo atual
-        caixa_atual = await conta_bancaria_repository.get_saldo_total(id_empresa)
         
         # Obter total a receber
         parcelas_dashboard = await parcela_service.get_dashboard_parcelas(
@@ -101,18 +116,127 @@ async def get_dashboard_resumo(
         )
         
         # Montar o resumo
-        resumo = ResumoDashboard(
-            caixa_atual=caixa_atual,
-            total_receber=total_receber,
-            total_pagar=total_pagar,
-            recebimentos_hoje=recebimentos_hoje,
-            pagamentos_hoje=pagamentos_hoje
-        )
+        response.caixa_atual = saldo_contas if saldo_contas else 0.0
+        response.total_receber = total_receber
+        response.total_pagar = total_pagar
+        response.recebimentos_hoje = recebimentos_hoje
+        response.pagamentos_hoje = pagamentos_hoje
         
-        return resumo
+        return response
     
     except Exception as e:
         logging.error(f"Erro ao obter resumo do dashboard: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao obter resumo do dashboard: {str(e)}"
+        ) 
+
+@router.get("/resumo", response_model=ResumoDashboardApi)
+async def get_dashboard_resumo_api_v1(
+    current_user: Usuario = Depends(get_current_user),
+    session: AsyncSession = Depends(get_async_session)
+) -> ResumoDashboardApi:
+    """
+    Retorna dados consolidados para o dashboard da empresa do usuário autenticado.
+    
+    Este endpoint agrega dados como receitas e despesas do mês atual, saldo mensal,
+    quantidades de clientes, fornecedores e lançamentos do mês.
+    """
+    logger.info(f"Obtendo resumo do dashboard para usuário {current_user.id_usuario}")
+    
+    try:
+        # Obter id_empresa do usuário autenticado
+        id_empresa = current_user.id_empresa
+        
+        # Verificar permissão de acesso à empresa
+        await verificar_permissao_empresa(id_empresa, current_user, session)
+        
+        # Inicializar resposta
+        response = ResumoDashboardApi()
+        
+        # Obter data atual com timezone
+        hoje = datetime.now()
+        mes_atual = hoje.month
+        ano_atual = hoje.year
+        
+        # Consultar receitas do mês atual (lancamentos de tipo 'entrada')
+        query_receitas = (
+            select(func.sum(Lancamento.valor))
+            .where(
+                and_(
+                    Lancamento.id_empresa == id_empresa,
+                    Lancamento.tipo == "entrada",
+                    extract('month', Lancamento.data_lancamento) == mes_atual,
+                    extract('year', Lancamento.data_lancamento) == ano_atual
+                )
+            )
+        )
+        result_receitas = await session.execute(query_receitas)
+        total_receitas = result_receitas.scalar_one_or_none() or 0.0
+        
+        # Consultar despesas do mês atual (lancamentos de tipo 'saida')
+        query_despesas = (
+            select(func.sum(Lancamento.valor))
+            .where(
+                and_(
+                    Lancamento.id_empresa == id_empresa,
+                    Lancamento.tipo == "saida",
+                    extract('month', Lancamento.data_lancamento) == mes_atual,
+                    extract('year', Lancamento.data_lancamento) == ano_atual
+                )
+            )
+        )
+        result_despesas = await session.execute(query_despesas)
+        total_despesas = result_despesas.scalar_one_or_none() or 0.0
+        
+        # Calcular saldo mensal
+        saldo_mensal = total_receitas - total_despesas
+        
+        # Consultar quantidade de clientes
+        query_clientes = (
+            select(func.count())
+            .select_from(Cliente)
+            .where(Cliente.id_empresa == id_empresa)
+        )
+        result_clientes = await session.execute(query_clientes)
+        qtd_clientes = result_clientes.scalar_one_or_none() or 0
+        
+        # Consultar quantidade de fornecedores
+        query_fornecedores = (
+            select(func.count())
+            .select_from(Fornecedor)
+            .where(Fornecedor.id_empresa == id_empresa)
+        )
+        result_fornecedores = await session.execute(query_fornecedores)
+        qtd_fornecedores = result_fornecedores.scalar_one_or_none() or 0
+        
+        # Consultar quantidade de lançamentos do mês
+        query_lancamentos = (
+            select(func.count())
+            .select_from(Lancamento)
+            .where(
+                and_(
+                    Lancamento.id_empresa == id_empresa,
+                    extract('month', Lancamento.data_lancamento) == mes_atual,
+                    extract('year', Lancamento.data_lancamento) == ano_atual
+                )
+            )
+        )
+        result_lancamentos = await session.execute(query_lancamentos)
+        qtd_lancamentos = result_lancamentos.scalar_one_or_none() or 0
+        
+        # Montar o resumo
+        response.total_receitas_mes_atual = float(total_receitas)
+        response.total_despesas_mes_atual = float(total_despesas)
+        response.saldo_mensal_atual = float(saldo_mensal)
+        response.quantidade_clientes = qtd_clientes
+        response.quantidade_fornecedores = qtd_fornecedores
+        response.quantidade_lancamentos_mes = qtd_lancamentos
+        
+        return response
+    
+    except Exception as e:
+        logging.error(f"Erro ao obter resumo do dashboard API v1: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao obter resumo do dashboard: {str(e)}"

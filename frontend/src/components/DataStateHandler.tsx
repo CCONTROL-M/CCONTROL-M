@@ -45,19 +45,19 @@ const DataStateHandler: React.FC<DataStateHandlerProps> = ({
   const loadingIdRef = useRef<string>(`${operationId}-${Date.now()}`);
   const isMockEnabled = useMock();
   const [retryDisabled, setRetryDisabled] = useState(false);
+  
+  // Referências para tracking de dados
   const previousDataLengthRef = useRef<number | undefined>(undefined);
-  const showLoadingRef = useRef<boolean>(false);
-  const mountedTimeRef = useRef<number>(Date.now());
   const contentReadyRef = useRef<boolean>(false);
   
-  // Identificar se é um relatório para tratamento especial
-  const isReportComponent = operationId.includes('dre') || operationId.includes('ciclo-operacional');
+  // Detectar se estamos lidando com um relatório (DRE ou Ciclo Operacional)
+  const isReportPage = operationId.includes('dre') || operationId.includes('ciclo');
   
   // Nunca usar loading global para relatórios
-  const shouldUseGlobalLoading = useGlobalLoading && !isReportComponent;
+  const shouldUseGlobalLoading = useGlobalLoading && !isReportPage;
   
-  // Usar estado local apenas para debounce do loading
-  const [shouldShowLoadingIndicator, setShouldShowLoadingIndicator] = useState<boolean>(false);
+  // Usar estado local para controlar o indicador de loading com debounce inteligente
+  const [showLocalLoadingIndicator, setShowLocalLoadingIndicator] = useState<boolean>(false);
   
   // Para relatórios, registrar imediatamente se temos dados
   useEffect(() => {
@@ -65,44 +65,33 @@ const DataStateHandler: React.FC<DataStateHandlerProps> = ({
     if (dataLength !== undefined && dataLength > 0) {
       contentReadyRef.current = true;
       previousDataLengthRef.current = dataLength;
+      
+      // Forçar esconder loading imediatamente quando temos dados
+      setShowLocalLoadingIndicator(false);
     }
-    
-    // Para relatórios, NUNCA mostrar loading se já temos dados ou estamos em montagem inicial
-    if (isReportComponent) {
-      if (previousDataLengthRef.current && previousDataLengthRef.current > 0) {
-        // Se já tínhamos dados anteriormente, não mostrar loading para relatórios
-        showLoadingRef.current = false;
-      } else {
-        // Para primeira carga, só mostrar loading após um tempo mínimo
-        const isInitialMount = Date.now() - mountedTimeRef.current < 300;
-        showLoadingRef.current = loading && !isInitialMount;
-      }
-    } else {
-      // Para componentes normais, seguir o loading normalmente
-      showLoadingRef.current = loading;
-    }
-  }, [loading, dataLength, isReportComponent]);
+  }, [dataLength]);
   
-  // Controlar o debounce para exibição do loading - evitar flash
+  // Controle de exibição do loading - com delay muito reduzido para relatórios
   useEffect(() => {
     // Limpar qualquer timer existente
     let loadingTimer: number | undefined;
     
     // Se tivermos dados OU não estamos carregando, não precisamos do indicador
-    if (contentReadyRef.current || !loading) {
-      setShouldShowLoadingIndicator(false);
+    if ((dataLength && dataLength > 0) || !loading) {
+      setShowLocalLoadingIndicator(false);
       return;
     }
     
-    // Se estamos carregando e NÃO temos o indicador ativo ainda
-    if (loading && !shouldShowLoadingIndicator && showLoadingRef.current) {
-      // Relatórios precisam de mais tempo antes de mostrar loading
-      const delay = isReportComponent ? 300 : 150;
+    // Se estamos carregando e NÃO temos dados
+    if (loading && !dataLength) {
+      // Usar delay extremamente reduzido para mostrar loading
+      // Para relatórios, usar 100ms em vez de 300ms
+      const delay = isReportPage ? 100 : 50;
       
       loadingTimer = window.setTimeout(() => {
-        // Só mostrar o indicador se ainda estivermos carregando e não tivermos dados
-        if (loading && !contentReadyRef.current) {
-          setShouldShowLoadingIndicator(true);
+        // Verificar novamente se ainda estamos carregando e se não temos dados
+        if (loading && (!dataLength || dataLength === 0)) {
+          setShowLocalLoadingIndicator(true);
         }
       }, delay);
     }
@@ -110,16 +99,16 @@ const DataStateHandler: React.FC<DataStateHandlerProps> = ({
     return () => {
       if (loadingTimer) clearTimeout(loadingTimer);
     };
-  }, [loading, shouldShowLoadingIndicator, isReportComponent]);
+  }, [loading, dataLength, isReportPage]);
   
-  // Ativar o loading global se necessário
+  // Gerenciar loading global
   useEffect(() => {
     if (!shouldUseGlobalLoading) return;
     
     // Usar um ID consistente durante todo o ciclo de vida do componente
     const loadingId = loadingIdRef.current;
     
-    if (loading) {
+    if (loading && !contentReadyRef.current) {
       startLoading(loadingId);
     } else {
       stopLoading(loadingId);
@@ -131,7 +120,7 @@ const DataStateHandler: React.FC<DataStateHandlerProps> = ({
         stopLoading(loadingId);
       }
     };
-  }, [loading, shouldUseGlobalLoading, startLoading, stopLoading]);
+  }, [loading, shouldUseGlobalLoading, startLoading, stopLoading, contentReadyRef]);
 
   // Desabilitar botão de retry após muitas tentativas
   useEffect(() => {
@@ -147,25 +136,6 @@ const DataStateHandler: React.FC<DataStateHandlerProps> = ({
     }
   }, [retryCount, maxRetries]);
 
-  // Detectar quando temos dados disponíveis e cancelar o loading imediatamente
-  useEffect(() => {
-    // Se tiver dados disponíveis, marcar como pronto e esconder loading
-    if (dataLength && dataLength > 0) {
-      console.log(`[${operationId}] Dados disponíveis (${dataLength} itens), interrompendo loading`);
-      
-      // Parar loading global se necessário
-      if (shouldUseGlobalLoading && loading) {
-        stopLoading(loadingIdRef.current);
-      }
-      
-      // Marcar que temos conteúdo pronto
-      contentReadyRef.current = true;
-      
-      // Forçar esconder o indicador de loading imediatamente
-      setShouldShowLoadingIndicator(false);
-    }
-  }, [dataLength, loading, operationId, stopLoading, shouldUseGlobalLoading]);
-
   // Função de retry com proteção
   const handleRetry = () => {
     if (retryDisabled || !onRetry) return;
@@ -174,25 +144,19 @@ const DataStateHandler: React.FC<DataStateHandlerProps> = ({
     contentReadyRef.current = false;
     onRetry();
   };
-
-  // Verificar se deve realmente mostrar o loading
-  const shouldRenderLoadingUI = loading && 
-                            (!shouldUseGlobalLoading || !useGlobalLoading) && 
-                            !dataLength && 
-                            showLoadingRef.current &&
-                            shouldShowLoadingIndicator;
   
-  // Se temos dados, sempre mostramos o conteúdo, mesmo durante carregamento
+  // IMPORTANTE: Se temos dados, sempre mostramos o conteúdo, mesmo durante carregamento
+  // Isto elimina o problema de flicker quando recarregamos dados
   if (dataLength && dataLength > 0) {
     return <>{children}</>;
   }
 
-  // Exibir mensagem de carregamento
-  if (shouldRenderLoadingUI) {
+  // Exibir mensagem de carregamento com animação suave
+  if (loading && showLocalLoadingIndicator) {
     return (
-      <div className="p-6 flex flex-col items-center justify-center" aria-live="polite" role="status">
-        <div className="animate-spin rounded-full h-10 w-10 border-t-2 border-b-2 border-blue-500"></div>
-        <p className="mt-3 text-sm text-gray-600">Carregando dados...</p>
+      <div className="data-state-loading" aria-live="polite" role="status">
+        <div className="spinner"></div>
+        <p>Carregando dados...</p>
       </div>
     );
   }
@@ -200,26 +164,21 @@ const DataStateHandler: React.FC<DataStateHandlerProps> = ({
   // Exibir mensagem de erro, se houver
   if (error && !loading) {
     return (
-      <div className="p-6 text-center">
-        <div className="bg-red-50 border border-red-200 rounded-md p-4 mb-4">
-          <div className="flex">
-            <div className="flex-shrink-0">
-              <svg className="h-5 w-5 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-              </svg>
-            </div>
-            <div className="ml-3">
-              <h3 className="text-sm font-medium text-red-800">Ocorreu um erro ao carregar os dados</h3>
-              <div className="mt-2 text-sm text-red-700">
-                <p>{error}</p>
-              </div>
-            </div>
-          </div>
+      <div className="data-state-error">
+        <div className="error-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="12" cy="12" r="10" />
+            <line x1="12" y1="8" x2="12" y2="12" />
+            <line x1="12" y1="16" x2="12.01" y2="16" />
+          </svg>
         </div>
+        <h3>Ocorreu um erro ao carregar os dados</h3>
+        <p>{error}</p>
         {onRetry && (
           <button
             onClick={handleRetry}
-            className="mt-2 px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+            className="btn btn-sm btn-primary"
+            disabled={retryDisabled}
           >
             Tentar novamente
           </button>
@@ -231,37 +190,25 @@ const DataStateHandler: React.FC<DataStateHandlerProps> = ({
   // Exibir mensagem de dados vazios se aplicável
   if (dataLength !== undefined && dataLength === 0 && !loading) {
     return (
-      <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 text-center m-2" aria-live="polite">
-        <svg 
-          className="mx-auto h-12 w-12 text-gray-400" 
-          xmlns="http://www.w3.org/2000/svg" 
-          fill="none" 
-          viewBox="0 0 24 24" 
-          stroke="currentColor"
-        >
-          <path 
-            strokeLinecap="round" 
-            strokeLinejoin="round" 
-            strokeWidth={1.5} 
-            d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" 
-          />
-        </svg>
-        <p className="mt-2 text-gray-600">{emptyMessage}</p>
+      <div className="data-state-empty" aria-live="polite">
+        <div className="empty-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M9 17h6M9 12h6M9 7h6" />
+            <path d="M5 22h14a2 2 0 002-2V4a2 2 0 00-2-2H5a2 2 0 00-2 2v16a2 2 0 002 2z" />
+          </svg>
+        </div>
+        <p>{emptyMessage}</p>
         {isMockEnabled && (
-          <p className="mt-2 text-sm text-orange-600">
+          <p className="empty-message-detail">
             Modo de demonstração ativo: Exibindo dados simulados.
-          </p>
-        )}
-        {!isMockEnabled && error && (
-          <p className="mt-2 text-sm text-red-600">
-            Erro de conexão com a API. Verifique se o servidor está online.
           </p>
         )}
       </div>
     );
   }
 
-  // Renderizar o conteúdo se não estivermos mostrando nenhum dos estados acima
+  // Renderizar o conteúdo sem delay se nenhum estado especial acima
+  // Esta mudança é crucial para evitar telas em branco durante o carregamento inicial
   return <>{children}</>;
 };
 

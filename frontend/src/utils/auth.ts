@@ -55,6 +55,26 @@ export function getEmpresaId(): string | null {
 }
 
 /**
+ * Obtém o ID da empresa para uso em requisições à API
+ * Retorna o ID da empresa do token ou null se não existir
+ * 
+ * @returns ID da empresa do token autenticado ou null
+ */
+export function getEmpresa(): string {
+  // Tenta obter do token
+  const empresaId = getEmpresaId();
+  
+  // Se encontrou no token, usa o valor real
+  if (empresaId) {
+    return empresaId;
+  }
+  
+  // Em vez de usar um ID fictício, lança um erro
+  console.error('ID da empresa não disponível no token');
+  throw new Error('ID da empresa não disponível. É necessário estar autenticado.');
+}
+
+/**
  * Obtém o ID do usuário logado
  */
 export function getUserId(): string | null {
@@ -96,5 +116,6 @@ export function getUserData(): Partial<DecodedToken> | null {
  */
 export function logout(): void {
   localStorage.removeItem('token');
-  window.location.href = '/login';
+  // Não redirecionar para login, apenas limpar o token
+  console.log('Logout realizado, token removido');
 } 

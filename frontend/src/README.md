@@ -15,6 +15,8 @@ Frontend da aplicação CCONTROL-M, desenvolvido com React e TypeScript.
   - [Componentes Principais](#componentes-principais)
   - [Serviços](#serviços)
   - [Contribuição](#contribuição)
+  - [Configuração de Produção](#configuração-de-produção)
+  - [Resumo das Principais Configurações](#resumo-das-principais-configurações)
 
 ## Visão Geral
 
@@ -101,6 +103,8 @@ Os seguintes serviços possuem implementação de mock:
 - Transferências entre contas
 - Usuários
 
+> **Atualização**: Os serviços de Relatórios (DRE, Fluxo de Caixa, Inadimplência, Ciclo Operacional) e Dashboard foram completamente migrados para utilizar dados reais do Supabase. O modo mock para estes serviços foi descontinuado e removido, garantindo que todas as visualizações de dados financeiros sejam sempre baseadas em dados reais do banco de dados.
+
 ### Desenvolvimento com Mocks
 
 Para criar um novo serviço mock:
@@ -163,3 +167,28 @@ Os serviços da aplicação são responsáveis pela comunicação com a API e im
 3. Commit suas mudanças (`git commit -m 'Adiciona nova funcionalidade'`)
 4. Push para a branch (`git push origin feature/nova-funcionalidade`)
 5. Abra um Pull Request 
+
+## Configuração de Produção
+
+Para configurar o frontend para ambiente de produção, siga as instruções detalhadas no arquivo `PRODUCAO.md` na raiz do projeto.
+
+### Resumo das Principais Configurações
+
+1. Configure o arquivo `.env.production` com as variáveis corretas:
+   ```
+   VITE_API_URL=http://seu-backend.com
+   VITE_MOCK_ENABLED=false
+   VITE_ENABLE_DEBUG_LOGS=false
+   ```
+
+2. Execute o build de produção:
+   ```bash
+   npm run build:prod
+   ```
+
+3. Para deploy usando Docker:
+   ```bash
+   docker-compose up -d
+   ```
+
+Consulte o arquivo `PRODUCAO.md` para instruções detalhadas sobre deployment, configuração de servidor web e segurança em produção. 

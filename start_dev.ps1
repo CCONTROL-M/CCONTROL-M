@@ -1,136 +1,86 @@
-# Script PowerShell para iniciar o ambiente de desenvolvimento
-Write-Host "Iniciando ambiente de desenvolvimento CCONTROL-M..." -ForegroundColor Green
+# Script para iniciar o ambiente de desenvolvimento do CCONTROL-M
+# Compatível com o ambiente de desenvolvimento atual (Frontend: 3000, Backend: 8002)
 
-# Verificar se já existem processos rodando nas portas 3000 e 8000
-Write-Host "Verificando processos ativos nas portas 3000 e 8000..." -ForegroundColor Yellow
+Write-Host "🚀 Iniciando ambiente de desenvolvimento CCONTROL-M..." -ForegroundColor Cyan
 
-# Função para verificar e matar processos em uma porta específica
-function Stop-ProcessOnPort {
-    param (
-        [int]$Port
-    )
+# Definir URLs e portas
+$FRONTEND_PORT = 3000
+$BACKEND_URL = "http://127.0.0.1:8002"
+
+# Criar pastas de logs se não existirem
+if (-not (Test-Path "logs")) {
+    New-Item -ItemType Directory -Path "logs" | Out-Null
+    Write-Host "📁 Pasta logs/ criada." -ForegroundColor Green
+}
+
+# Função para verificar se porta está em uso
+function Test-PortInUse {
+    param($port)
     
-    Write-Host "Verificando processos na porta $Port..." -ForegroundColor Yellow
-    
-    # Tenta várias abordagens para garantir que a porta seja liberada
+    $connection = New-Object System.Net.Sockets.TcpClient
     try {
-        # Abordagem 1: Usando netstat e taskkill
-        $processInfo = netstat -ano | Select-String "[:.]$Port\s+.*LISTENING"
-        if ($processInfo) {
-            $processInfo | ForEach-Object {
-                $line = $_ -split '\s+'
-                $processId = $line | Select-Object -Last 1
-                
-                if ($processId -match '^\d+$') {
-                    Write-Host "Encerrando processo (PID: $processId) na porta $Port..." -ForegroundColor Yellow
-                    taskkill /PID $processId /F /T | Out-Null
-                    Write-Host "Processo na porta $Port finalizado." -ForegroundColor Green
-                }
-            }
-        }
-        
-        # Abordagem 2: Verificação adicional para garantir
-        Start-Sleep -Seconds 1
-        $checkAgain = netstat -ano | Select-String "[:.]$Port\s+.*LISTENING"
-        if ($checkAgain) {
-            Write-Host "Alguns processos ainda estão usando a porta $Port. Tentando novamente..." -ForegroundColor Red
-            $checkAgain | ForEach-Object {
-                $line = $_ -split '\s+'
-                $processId = $line | Select-Object -Last 1
-                
-                if ($processId -match '^\d+$') {
-                    Write-Host "Encerrando processo persistente (PID: $processId)..." -ForegroundColor Yellow
-                    Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
-                }
-            }
+        $connection.Connect("127.0.0.1", $port)
+        $connection.Close()
+        return $true
+    }
+    catch {
+        return $false
+    }
+}
+
+# Verificar se portas estão em uso e limpar se necessário
+if (Test-PortInUse $FRONTEND_PORT) {
+    Write-Host "⚠️ Porta $FRONTEND_PORT em uso. Tentando encerrar processo..." -ForegroundColor Yellow
+    try {
+        $processId = Get-NetTCPConnection -LocalPort $FRONTEND_PORT -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess
+        if ($processId) {
+            Stop-Process -Id $processId -Force
+            Write-Host "✅ Processo na porta $FRONTEND_PORT encerrado." -ForegroundColor Green
         }
     }
     catch {
-        Write-Host "Erro ao finalizar processos na porta $Port`: $_" -ForegroundColor Red
+        Write-Host "❌ Não foi possível encerrar o processo na porta $FRONTEND_PORT." -ForegroundColor Red
     }
-    
-    # Verifica se a porta foi liberada
-    $portFree = -not (netstat -ano | Select-String "[:.]$Port\s+.*LISTENING")
-    return $portFree
 }
 
-# Liberar portas
-$port3000Free = Stop-ProcessOnPort -Port 3000
-$port8000Free = Stop-ProcessOnPort -Port 8000
+# Iniciar o frontend
+Write-Host "🖥️ Iniciando frontend na porta $FRONTEND_PORT..." -ForegroundColor Cyan
+$frontendPath = Join-Path $PSScriptRoot "frontend"
+$frontendLog = Join-Path $PSScriptRoot "logs\frontend.log"
 
-if (-not $port3000Free) {
-    Write-Host "AVISO: Não foi possível liberar completamente a porta 3000!" -ForegroundColor Red
-    Write-Host "O frontend pode não iniciar corretamente." -ForegroundColor Red
-}
+Start-Process -FilePath "cmd.exe" -ArgumentList "/c cd $frontendPath && npm run dev > $frontendLog 2>&1" -WindowStyle Normal
 
-if (-not $port8000Free) {
-    Write-Host "AVISO: Não foi possível liberar completamente a porta 8000!" -ForegroundColor Red
-    Write-Host "O backend pode não iniciar corretamente." -ForegroundColor Red
-}
+# Verificar se o backend está acessível
+Write-Host "🔍 Verificando conexão com backend em $BACKEND_URL..." -ForegroundColor Cyan
+$backendAvailable = $false
+$retryCount = 0
+$maxRetries = 3
 
-# Criar diretório de logs se não existir
-Write-Host "Verificando diretório de logs..." -ForegroundColor Yellow
-try {
-    if (-not (Test-Path "logs")) {
-        Write-Host "Criando diretório de logs..." -ForegroundColor Gray
-        New-Item -Path "logs" -ItemType Directory | Out-Null
-        Write-Host "Diretório de logs criado com sucesso." -ForegroundColor Green
+while (-not $backendAvailable -and $retryCount -lt $maxRetries) {
+    try {
+        $response = Invoke-WebRequest -Uri "$BACKEND_URL/health" -Method GET -UseBasicParsing -ErrorAction SilentlyContinue
+        if ($response.StatusCode -eq 200) {
+            $backendAvailable = $true
+            Write-Host "✅ Backend disponível em $BACKEND_URL" -ForegroundColor Green
+        }
     }
-} catch {
-    Write-Host "Erro ao criar diretório de logs. Tentando continuar..." -ForegroundColor Red
-}
-
-# Definir títulos para as janelas
-$backendTitle = "Backend CCONTROL-M"
-$frontendTitle = "Frontend CCONTROL-M"
-
-# Iniciar o backend em uma nova janela PowerShell
-Write-Host "Iniciando backend..." -ForegroundColor Cyan
-try {
-    $backendScript = @"
-    `$host.ui.RawUI.WindowTitle = '$backendTitle'
-    cd '$PWD\backend'
-    Write-Host 'Iniciando backend na porta 8000' -ForegroundColor Cyan
-    uvicorn app.main:app --reload --port 8000 *> '..\logs\backend.log'
-    if (`$LASTEXITCODE -ne 0) {
-        Write-Host 'Falha ao iniciar o backend. Verifique se o Uvicorn está instalado.' -ForegroundColor Red
-        Read-Host 'Pressione ENTER para sair'
+    catch {
+        $retryCount++
+        if ($retryCount -lt $maxRetries) {
+            Write-Host "⚠️ Backend não disponível. Tentativa $retryCount de $maxRetries..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+        }
+        else {
+            Write-Host "❌ Backend não está acessível em $BACKEND_URL" -ForegroundColor Red
+            Write-Host "⚠️ Verifique se o backend está em execução na porta 8002" -ForegroundColor Yellow
+        }
     }
-"@
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", $backendScript
-} catch {
-    Write-Host "Erro ao iniciar o backend: $_" -ForegroundColor Red
 }
 
-Write-Host "Aguardando inicialização do backend (5 segundos)..." -ForegroundColor Yellow
-Start-Sleep -Seconds 5
-
-# Iniciar o frontend em uma nova janela PowerShell
-Write-Host "Iniciando frontend..." -ForegroundColor Cyan
-try {
-    $frontendScript = @"
-    `$host.ui.RawUI.WindowTitle = '$frontendTitle'
-    Set-Location '$PWD\frontend'
-    Write-Host 'Iniciando frontend na porta 3000' -ForegroundColor Cyan
-    # Usando & para chamar o comando npm diretamente no PowerShell
-    & npm run dev *> '..\logs\frontend.log'
-    if (`$LASTEXITCODE -ne 0) {
-        Write-Host 'Falha ao iniciar o frontend. Verifique se o Node.js está instalado corretamente.' -ForegroundColor Red
-        Read-Host 'Pressione ENTER para sair'
-    }
-"@
-    Start-Process powershell -ArgumentList "-NoExit", "-Command", $frontendScript
-} catch {
-    Write-Host "Erro ao iniciar o frontend: $_" -ForegroundColor Red
-}
-
-Write-Host ""
-Write-Host "Ambiente de desenvolvimento iniciado!" -ForegroundColor Green
-Write-Host ""
-Write-Host "Backend: http://localhost:8000" -ForegroundColor Cyan
-Write-Host "Frontend: http://localhost:3000" -ForegroundColor Cyan
-Write-Host "Docs API: http://localhost:8000/docs" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "Se os servidores não iniciarem automaticamente, tente executar manualmente:" -ForegroundColor Yellow
-Write-Host "- Backend: cd backend; uvicorn app.main:app --reload --port 8000" -ForegroundColor Gray
-Write-Host "- Frontend: cd frontend; npm run dev" -ForegroundColor Gray 
+# Exibir URLs de acesso
+Write-Host "`n📋 Ambiente de desenvolvimento iniciado!" -ForegroundColor Green
+Write-Host "📊 Frontend: http://localhost:$FRONTEND_PORT" -ForegroundColor Cyan
+Write-Host "🔌 Backend API: $BACKEND_URL/api/v1" -ForegroundColor Cyan
+Write-Host "📚 Documentação API: $BACKEND_URL/docs" -ForegroundColor Cyan
+Write-Host "📝 Logs: ./logs/frontend.log" -ForegroundColor Cyan
+Write-Host "`n⚠️ Para encerrar, feche os terminais ou pressione Ctrl+C em cada um deles." -ForegroundColor Yellow 

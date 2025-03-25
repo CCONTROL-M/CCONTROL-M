@@ -398,3 +398,87 @@ class LancamentoService:
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Erro interno ao atualizar status do lançamento"
             )
+
+    async def listar_lancamentos(
+        self,
+        id_empresa: UUID,
+        tipo: Optional[str] = None,
+        id_categoria: Optional[UUID] = None,
+        id_centro_custo: Optional[UUID] = None,
+        id_conta: Optional[UUID] = None,
+        status: Optional[str] = None,
+        data_inicio: Optional[str] = None,
+        data_fim: Optional[str] = None,
+        page: int = 1,
+        page_size: int = 10
+    ) -> Tuple[List[LancamentoSchema], int]:
+        """
+        Listar lançamentos com filtros.
+        
+        Args:
+            id_empresa: ID da empresa
+            tipo: Tipo do lançamento (receita/despesa)
+            id_categoria: ID da categoria
+            id_centro_custo: ID do centro de custo
+            id_conta: ID da conta bancária
+            status: Status do lançamento
+            data_inicio: Data inicial (formato YYYY-MM-DD)
+            data_fim: Data final (formato YYYY-MM-DD)
+            page: Número da página
+            page_size: Tamanho da página
+            
+        Returns:
+            Tupla com lista de lançamentos e contagem total
+        """
+        try:
+            # Converter datas se fornecidas
+            data_inicio_obj = None
+            data_fim_obj = None
+            
+            if data_inicio:
+                try:
+                    data_inicio_obj = datetime.strptime(data_inicio, "%Y-%m-%d").date()
+                except ValueError:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Formato de data_inicio inválido. Use YYYY-MM-DD."
+                    )
+            
+            if data_fim:
+                try:
+                    data_fim_obj = datetime.strptime(data_fim, "%Y-%m-%d").date()
+                except ValueError:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="Formato de data_fim inválido. Use YYYY-MM-DD."
+                    )
+            
+            # Calcular skip para paginação
+            skip = (page - 1) * page_size
+            
+            # Chamar o repositório para obter os dados
+            lancamentos, total = await self.repository.get_by_empresa(
+                id_empresa=id_empresa,
+                skip=skip,
+                limit=page_size,
+                tipo=tipo,
+                data_inicio=data_inicio_obj,
+                data_fim=data_fim_obj,
+                id_cliente=None,  # Não implementado no filtro
+                id_fornecedor=None,  # Não implementado no filtro
+                id_conta=id_conta,
+                status=status
+            )
+            
+            # Converter para schema e retornar
+            lancamentos_schema = [LancamentoSchema.model_validate(lancamento) for lancamento in lancamentos]
+            return lancamentos_schema, total
+            
+        except HTTPException:
+            raise
+        except Exception as e:
+            self.logger.error(f"Erro ao listar lançamentos: {str(e)}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Erro interno ao listar lançamentos"
+            )

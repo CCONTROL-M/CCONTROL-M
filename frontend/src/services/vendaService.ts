@@ -4,10 +4,7 @@ import { getEmpresaId } from "../utils/auth";
 import { listarVendasMock } from "./vendaServiceMock";
 import { useMock } from "../utils/mock";
 
-// ID de empresa de teste para ambiente de desenvolvimento
-const EMPRESA_TESTE_ID = "11111111-1111-1111-1111-111111111111";
-
-// Função para obter ID da empresa ou usar valor padrão para desenvolvimento
+// Função para obter ID da empresa ou lançar erro
 function getEmpresa(): string {
   // Tenta obter do token
   const empresaId = getEmpresaId();
@@ -19,11 +16,10 @@ function getEmpresa(): string {
   
   // Verifica se estamos em ambiente de desenvolvimento
   if (import.meta.env.DEV) {
-    console.warn('ID da empresa não disponível no token. Usando ID de teste para ambiente de desenvolvimento.');
-    return EMPRESA_TESTE_ID;
+    console.error('ID da empresa não disponível no token. Use a página de empresas para selecionar uma empresa.');
   }
   
-  // Em produção, lança erro
+  // Lançar erro
   throw new Error("ID da empresa não disponível. Faça login novamente.");
 }
 
@@ -40,8 +36,8 @@ export async function listarVendas(): Promise<Venda[]> {
     
     console.log("Buscando vendas para empresa:", id_empresa);
     
-    // URL corrigida para incluir o prefixo /api/v1
-    const response = await api.get("/api/v1/vendas", {
+    // URL corrigida, sem o prefixo /api/v1 duplicado
+    const response = await api.get("/vendas", {
       params: { id_empresa }
     });
     
@@ -58,8 +54,8 @@ export async function listarVendas(): Promise<Venda[]> {
     }
   } catch (error) {
     console.error("Erro ao listar vendas:", error);
-    console.warn("Usando dados mock após falha na API");
-    return await listarVendasMock();
+    // Desativar fallback para mock - retornar lista vazia em caso de erro
+    return [];
   }
 }
 
@@ -75,17 +71,14 @@ export async function buscarVenda(id: string): Promise<Venda> {
   try {
     const id_empresa = getEmpresa();
     
-    const response = await api.get(`/api/v1/vendas/${id}`, {
+    const response = await api.get(`/vendas/${id}`, {
       params: { id_empresa }
     });
     
     return response.data;
   } catch (error) {
     console.error("Erro ao buscar venda:", error);
-    // Tentar fallback para mock
-    const vendasMock = await listarVendasMock();
-    const venda = vendasMock.find(v => v.id_venda === id);
-    if (venda) return venda;
+    // Não usar fallback para mock - repassar o erro original
     throw error;
   }
 }
@@ -118,21 +111,11 @@ export async function cadastrarVenda(venda: NovaVenda): Promise<Venda> {
       id_empresa
     };
     
-    const response = await api.post("/api/v1/vendas", vendaData);
+    const response = await api.post("/vendas", vendaData);
     return response.data;
   } catch (error) {
     console.error("Erro ao cadastrar venda:", error);
-    // Falhar silenciosamente em desenvolvimento com mock
-    if (import.meta.env.DEV) {
-      console.warn("Usando mock após falha na API");
-      return {
-        id_venda: `mock-${Date.now()}`,
-        id_empresa: getEmpresa(),
-        ...venda,
-        data_venda: new Date().toISOString().split('T')[0],
-        status: "confirmada"
-      } as Venda;
-    }
+    // Remover fallback para mock - sempre lançar o erro original
     throw error;
   }
 }
@@ -140,7 +123,7 @@ export async function cadastrarVenda(venda: NovaVenda): Promise<Venda> {
 export async function atualizarVenda(id: string, venda: Partial<Venda>): Promise<Venda> {
   const id_empresa = getEmpresa();
   
-  const response = await api.put(`/api/v1/vendas/${id}`, venda, {
+  const response = await api.put(`/vendas/${id}`, venda, {
     params: { id_empresa }
   });
   
@@ -150,7 +133,7 @@ export async function atualizarVenda(id: string, venda: Partial<Venda>): Promise
 export async function removerVenda(id: string): Promise<void> {
   const id_empresa = getEmpresa();
   
-  await api.delete(`/api/v1/vendas/${id}`, {
+  await api.delete(`/vendas/${id}`, {
     params: { id_empresa }
   });
 }
@@ -158,7 +141,7 @@ export async function removerVenda(id: string): Promise<void> {
 export async function listarParcelasPorVenda(id: string) {
   const id_empresa = getEmpresa();
   
-  const response = await api.get(`/api/v1/vendas/${id}/parcelas`, {
+  const response = await api.get(`/vendas/${id}/parcelas`, {
     params: { id_empresa }
   });
   

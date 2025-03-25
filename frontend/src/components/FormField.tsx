@@ -13,8 +13,14 @@ export interface FormFieldProps {
   helperText?: string;
   disabled?: boolean;
   min?: number;
+  width?: 'full' | 'half' | 'third' | 'auto';
+  className?: string;
 }
 
+/**
+ * Componente de campo de formulário padronizado
+ * Utiliza as variáveis CSS globais para estilização consistente
+ */
 const FormField: React.FC<FormFieldProps> = ({
   label,
   name,
@@ -28,10 +34,29 @@ const FormField: React.FC<FormFieldProps> = ({
   helperText,
   disabled = false,
   min,
+  width = 'full',
+  className = '',
 }) => {
+  const getWidthClass = () => {
+    switch (width) {
+      case 'half':
+        return 'form-field-half';
+      case 'third':
+        return 'form-field-third';
+      case 'auto':
+        return 'form-field-auto';
+      case 'full':
+      default:
+        return 'form-field-full';
+    }
+  };
+
   return (
-    <div className="form-field">
-      <label htmlFor={name}>{label}{required && <span className="required">*</span>}</label>
+    <div className={`form-field ${getWidthClass()} ${className}`}>
+      <label htmlFor={name}>
+        {label}
+        {required && <span className="required">*</span>}
+      </label>
       <input
         type={type}
         id={name}
@@ -44,9 +69,19 @@ const FormField: React.FC<FormFieldProps> = ({
         step={step}
         disabled={disabled}
         min={min}
+        aria-invalid={error ? 'true' : 'false'}
+        aria-describedby={error ? `${name}-error` : helperText ? `${name}-helper` : undefined}
       />
-      {helperText && <div className="helper-text">{helperText}</div>}
-      {error && <div className="form-field-error">{error}</div>}
+      {helperText && (
+        <div className="helper-text" id={`${name}-helper`}>
+          {helperText}
+        </div>
+      )}
+      {error && (
+        <div className="form-field-error" id={`${name}-error`}>
+          {error}
+        </div>
+      )}
     </div>
   );
 };

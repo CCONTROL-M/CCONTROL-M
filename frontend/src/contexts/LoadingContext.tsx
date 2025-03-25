@@ -10,6 +10,8 @@ interface LoadingContextType {
   activeOperationsCount: number;
   activeOperations: Set<string>;
   resetLoadingState: () => void;
+  // Novo método para loading silencioso (sem overlay)
+  startSilentLoading: (operationId: string) => void;
 }
 
 // Criação do contexto
@@ -26,11 +28,11 @@ export const useLoading = (): LoadingContextType => {
   return context;
 };
 
-// Tempo de segurança máximo para carregamento (7 segundos - reduzido de 15)
-const SAFETY_TIMEOUT = 7000;
+// Tempo de segurança máximo para carregamento (5 segundos - reduzido de 7)
+const SAFETY_TIMEOUT = 5000;
 
 // Debounce para atualizações no estado de loading (ms) - reduzido para ser mais responsivo
-const DEBOUNCE_TIME = 50;
+const DEBOUNCE_TIME = 30;
 
 // Interface para as props do provider
 interface LoadingProviderProps {
@@ -42,16 +44,18 @@ export const LoadingProvider: React.FC<LoadingProviderProps> = ({ children }) =>
   // Usando useRef para valores que não devem causar re-renderizações
   const isLoadingRef = useRef<boolean>(false);
   const activeOperationsRef = useRef<Set<string>>(new Set());
+  const silentOperationsRef = useRef<Set<string>>(new Set());
   const loadingCounterRef = useRef<number>(0);
   const safetyTimerIdRef = useRef<number | null>(null);
   const updateTimerRef = useRef<number | null>(null);
+  const lastTransitionTimeRef = useRef<number>(0);
   
   // Estados que causarão re-renderizações quando atualizados
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [activeOperations, setActiveOperations] = useState<Set<string>>(new Set());
   const [loadingCounter, setLoadingCounter] = useState<number>(0);
   
-  // Função para atualizar o estado de loading com debounce
+  // Função para atualizar o estado de loading com debounce inteligente
   const updateLoadingState = useCallback(() => {
     // Limpar qualquer timer pendente
     if (updateTimerRef.current !== null) {
@@ -59,11 +63,30 @@ export const LoadingProvider: React.FC<LoadingProviderProps> = ({ children }) =>
       updateTimerRef.current = null;
     }
     
+    // Calcular o tempo desde a última transição
+    const now = Date.now();
+    const timeSinceLastTransition = now - lastTransitionTimeRef.current;
+    
+    // Usar debounce mais curto se estivermos ativando o loading
+    // e um debounce mais longo se estivermos desativando
+    const delayTime = isLoadingRef.current && !isLoading 
+      ? DEBOUNCE_TIME  // Ativar loading rapidamente
+      : Math.max(DEBOUNCE_TIME, Math.min(300, timeSinceLastTransition)); // Desativar com delay proporcional
+    
     // Configurar um timer para atualizar o estado de loading após debounce
     updateTimerRef.current = window.setTimeout(() => {
+      // Verificar se temos operações silenciosas e nenhuma operação regular
+      const hasOnlySilentOperations = silentOperationsRef.current.size > 0 && 
+        (activeOperationsRef.current.size === silentOperationsRef.current.size);
+      
+      // Se todas as operações são silenciosas, não mostrar loading global
+      const shouldShowLoading = isLoadingRef.current && !hasOnlySilentOperations;
+      
       // Atualizar state apenas se o valor for diferente para evitar re-renderizações desnecessárias
-      if (isLoadingRef.current !== isLoading) {
-        setIsLoading(isLoadingRef.current);
+      if (shouldShowLoading !== isLoading) {
+        setIsLoading(shouldShowLoading);
+        // Registrar quando ocorreu a última transição
+        lastTransitionTimeRef.current = Date.now();
       }
       
       // Atualizar outros estados se necessário
@@ -77,7 +100,7 @@ export const LoadingProvider: React.FC<LoadingProviderProps> = ({ children }) =>
       }
       
       updateTimerRef.current = null;
-    }, DEBOUNCE_TIME);
+    }, delayTime);
   }, [isLoading, loadingCounter, activeOperations]);
   
   // Iniciar temporizador de segurança
@@ -116,6 +139,7 @@ export const LoadingProvider: React.FC<LoadingProviderProps> = ({ children }) =>
     isLoadingRef.current = false;
     loadingCounterRef.current = 0;
     activeOperationsRef.current.clear();
+    silentOperationsRef.current.clear();
     
     // Atualizar os estados React
     setIsLoading(false);
@@ -133,11 +157,32 @@ export const LoadingProvider: React.FC<LoadingProviderProps> = ({ children }) =>
     resetLoadingStateInternal();
   }, [resetLoadingStateInternal]);
   
-  // Ativar/desativar o loading com controle de contagem
+  // Iniciar loading silencioso (sem overlay)
+  const startSilentLoading = useCallback((operationId: string) => {
+    // Incrementar contador
+    loadingCounterRef.current += 1;
+    
+    // Atualizar estado de loading
+    isLoadingRef.current = true;
+    
+    // Rastrear como operação ativa e silenciosa
+    activeOperationsRef.current.add(operationId);
+    silentOperationsRef.current.add(operationId);
+    
+    // Iniciar timer de segurança se ainda não estiver ativo
+    if (safetyTimerIdRef.current === null) {
+      startSafetyTimer();
+    }
+    
+    // Atualizar os estados React com debounce
+    updateLoadingState();
+  }, [startSafetyTimer, updateLoadingState]);
+  
+  // Ativar o loading com controle de contagem
   const startLoading = useCallback((operationId?: string) => {
-    // Nunca iniciar loading para relatórios específicos
+    // Detectar loading para relatórios e torná-lo silencioso automaticamente
     if (operationId && (operationId.includes('dre') || operationId.includes('ciclo'))) {
-      console.log(`[${operationId}] Loading global ignorado para relatório`);
+      startSilentLoading(operationId);
       return;
     }
     
@@ -159,12 +204,17 @@ export const LoadingProvider: React.FC<LoadingProviderProps> = ({ children }) =>
     
     // Atualizar os estados React com debounce
     updateLoadingState();
-  }, [startSafetyTimer, updateLoadingState]);
+  }, [startSilentLoading, startSafetyTimer, updateLoadingState]);
   
   const stopLoading = useCallback((operationId?: string) => {
     // Decrementar contador apenas se for maior que zero
     if (loadingCounterRef.current > 0) {
       loadingCounterRef.current -= 1;
+    }
+    
+    // Remover da lista de operações silenciosas se aplicável
+    if (operationId && silentOperationsRef.current.has(operationId)) {
+      silentOperationsRef.current.delete(operationId);
     }
     
     // Atualizar estado de loading se contador chegar a zero
@@ -212,6 +262,7 @@ export const LoadingProvider: React.FC<LoadingProviderProps> = ({ children }) =>
     startLoading,
     stopLoading,
     setLoadingState,
+    startSilentLoading,
     activeOperationsCount: loadingCounter,
     activeOperations,
     resetLoadingState
@@ -223,6 +274,8 @@ export const LoadingProvider: React.FC<LoadingProviderProps> = ({ children }) =>
       <LoadingOverlay 
         visible={isLoading} 
         text={loadingCounter > 1 ? `Carregando... (${loadingCounter} operações)` : "Carregando..."}
+        theme="light"
+        blur={false}
       />
     </LoadingContext.Provider>
   );

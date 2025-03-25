@@ -80,6 +80,16 @@ class SecurityMiddleware(BaseHTTPMiddleware):
             "/api/v1/openapi.json"
         }
         
+        # Lista de rotas públicas (não necessitam de autenticação)
+        self.public_routes = {
+            "/api/v1/health",
+            "/api/v1/docs",
+            "/api/v1/openapi.json",
+            "/health",
+            "/docs",
+            "/openapi.json"
+        }
+        
         # Lista de rotas sensíveis (requerem validação extra)
         self.sensitive_routes = {
             "/api/v1/usuarios",

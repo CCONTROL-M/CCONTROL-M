@@ -96,7 +96,7 @@ if (Test-Path "backend\app\middlewares\cors_middleware.py") {
 # Recomendações
 Write-Host "`nRECOMENDAÇÕES:" -ForegroundColor Cyan
 Write-Host "1. Verifique se tanto o backend quanto o frontend estão rodando" -ForegroundColor White
-Write-Host "2. Verifique se a URL da API no frontend está correta (deve ser: http://localhost:8000)" -ForegroundColor White
+Write-Host "2. Verifique se a URL da API no frontend está correta (deve ser: http://127.0.0.1:8002/api/v1)" -ForegroundColor White
 Write-Host "3. Certifique-se de que as origens CORS no backend permitem o frontend (localhost:3000)" -ForegroundColor White
 Write-Host "4. Caso o problema persista, use o script 'start_dev.ps1' para reiniciar todo o ambiente" -ForegroundColor White
 Write-Host "5. Verifique os logs do backend para identificar erros específicos" -ForegroundColor White
